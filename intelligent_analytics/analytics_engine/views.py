@@ -1,11 +1,28 @@
 from django.http import JsonResponse
-from .data_processing.data_cleaner import DataCleaner
 from .data_processing.data_loader import load_data
+from .data_processing.data_cleaner import DataCleaner
+import json
+from .models import Dataset, CleanedData
 
 def upload_data(request):
     if request.method == 'POST':
         file = request.FILES['file']
-        df = load_data(file)
+
+        dataset = Dataset.objects.create(
+            name=file.name,
+            file=file
+        )
+
+
+        df = load_data(dataset.file.path)
         cleaner = DataCleaner(df)
         cleaned_df = cleaner.clean()
-        return JsonResponse({'status': "Data Cleaned Succesfully"})
+
+        cleaned_json = cleaned_df.to_dict(orient='records')
+
+        CleanedData.objects.create(
+            dataset=dataset,
+            data=cleaned_json
+        )
+
+        return JsonResponse({"status": "Data stored successfully"})
