@@ -1,28 +1,38 @@
-from django.http import JsonResponse
+from django.shortcuts import render
+from .models import Dataset, CleanedData
 from .data_processing.data_loader import load_data
 from .data_processing.data_cleaner import DataCleaner
-import json
-from .models import Dataset, CleanedData
 
-def upload_data(request):
-    if request.method == 'POST':
-        file = request.FILES['file']
+def upload_csv(request):
+    message = ""
 
+    if request.method == "POST":
+        uploaded_file = request.FILES.get("file")
+
+        # 1. Save dataset info
         dataset = Dataset.objects.create(
-            name=file.name,
-            file=file
+            name=uploaded_file.name,
+            file=uploaded_file
         )
 
-
+        # 2. Load data using Pandas
         df = load_data(dataset.file.path)
+
+        # 3. Clean data
         cleaner = DataCleaner(df)
         cleaned_df = cleaner.clean()
 
-        cleaned_json = cleaned_df.to_dict(orient='records')
+        # 4. Convert to JSON
+        cleaned_json = cleaned_df.to_dict(orient="records")
 
+        # 5. Store cleaned data in MySQL
         CleanedData.objects.create(
             dataset=dataset,
             data=cleaned_json
         )
 
-        return JsonResponse({"status": "Data stored successfully"})
+        message = "File uploaded, cleaned, and stored successfully!"
+
+    return render(request, "analytics_engine/upload.html", {
+        "message": message
+    })
