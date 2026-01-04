@@ -1,24 +1,121 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>Upload CSV - Intelligent Analytics</title>
+    <meta charset="UTF-8">
+    <title>Intelligent Business Analytics | Upload Data</title>
+
+    <style>
+        body {
+            font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+            background: #f4f6f9;
+            margin: 0;
+            padding: 0;
+        }
+
+        .container {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+
+        .card {
+            background: #ffffff;
+            width: 420px;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.08);
+        }
+
+        .title {
+            font-size: 22px;
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: #1f2937;
+        }
+
+        .subtitle {
+            font-size: 14px;
+            color: #6b7280;
+            margin-bottom: 25px;
+        }
+
+        .file-input {
+            width: 100%;
+            padding: 12px;
+            border: 1px dashed #9ca3af;
+            border-radius: 6px;
+            margin-bottom: 20px;
+            cursor: pointer;
+        }
+
+        .btn {
+            width: 100%;
+            padding: 12px;
+            background: #2563eb;
+            color: #ffffff;
+            border: none;
+            border-radius: 6px;
+            font-size: 15px;
+            font-weight: 500;
+            cursor: pointer;
+        }
+
+        .btn:hover {
+            background: #1e40af;
+        }
+
+        .info {
+            font-size: 12px;
+            color: #6b7280;
+            margin-top: 12px;
+            text-align: center;
+        }
+
+        .message {
+            margin-top: 15px;
+            padding: 10px;
+            background: #ecfdf5;
+            color: #065f46;
+            border-radius: 6px;
+            font-size: 14px;
+            text-align: center;
+        }
+    </style>
 </head>
+
 <body>
 
-<h2>Upload Business Data (CSV)</h2>
+<div class="container">
+    <div class="card">
 
-<form method="POST" enctype="multipart/form-data">
-    {% csrf_token %}
-    
-    <input type="file" name="file" accept=".csv" required>
-    <br><br>
+        <div class="title">Upload Business Dataset</div>
+        <div class="subtitle">
+            Upload your CSV file to generate analytics-ready data and insights.
+        </div>
 
-    <button type="submit">Upload & Process</button>
-</form>
+        <form method="POST" enctype="multipart/form-data">
+            {% csrf_token %}
 
-{% if message %}
-    <p>{{ message }}</p>
-{% endif %}
+            <input type="file" name="file" accept=".csv" class="file-input" required>
+
+            <button type="submit" class="btn">
+                Upload & Process Data
+            </button>
+        </form>
+
+        {% if message %}
+            <div class="message">
+                {{ message }}
+            </div>
+        {% endif %}
+
+        <div class="info">
+            Supported format: CSV • Secure processing • Power BI ready
+        </div>
+
+    </div>
+</div>
 
 </body>
 </html>
