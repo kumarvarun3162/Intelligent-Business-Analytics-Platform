@@ -1,8 +1,8 @@
-📊 Intelligent Business Analytics Platform
+# 📊 Intelligent Business Analytics Platform
 
 An end-to-end Business Intelligence and Analytics platform that allows companies to upload raw business data, automatically clean and preprocess it, store it in a relational database, and generate Power BI–ready analytics datasets with AI-driven insights.
 
-🚀 Project Overview
+# 🚀 Project Overview
 
 Modern businesses struggle with:
 
@@ -16,7 +16,7 @@ Lack of actionable insights
 
 This project solves these problems by building an intelligent analytics pipeline using Django, Pandas, MySQL, and Power BI.
 
-🧠 Key Features
+# 🧠 Key Features
 
 📁 CSV Data Upload Interface
 
@@ -30,7 +30,7 @@ This project solves these problems by building an intelligent analytics pipeline
 
 🔒 Secure and scalable backend architecture
 
-🏗 System Architecture
+# 🏗 System Architecture
 User Upload (CSV)
         ↓
 Django Backend
@@ -43,7 +43,7 @@ Power BI Dashboards
         ↓
 AI-based Business Insights
 
-🛠 Tech Stack
+# 🛠 Tech Stack
 Layer	Technology
 Backend	Django (Python)
 Data Processing	Pandas, NumPy
@@ -53,7 +53,7 @@ Frontend	HTML, CSS
 ORM	Django ORM
 
 
-⚙️ How It Works
+# ⚙️ How It Works
 
 User uploads a CSV file through the web interface
 
@@ -67,7 +67,7 @@ Data is made available for Power BI dashboards
 
 (Optional) AI layer generates business insights
 
-📊 Sample Use Cases
+# 📊 Sample Use Cases
 
 Sales Performance Analysis
 
