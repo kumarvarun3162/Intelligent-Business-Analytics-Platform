@@ -6,10 +6,10 @@ An end-to-end Business Intelligence and Analytics platform that allows companies
 
 Modern businesses struggle with:
 
-        Messy raw data
-        Manual data cleaning
-        Slow dashboard creation
-        Lack of actionable insights
+        1. Messy raw data
+        2. Manual data cleaning
+        3. Slow dashboard creation
+        4. Lack of actionable insights
 
 This project solves these problems by building an intelligent analytics pipeline using Django, Pandas, MySQL, and Power BI.
 
