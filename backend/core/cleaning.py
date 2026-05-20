@@ -521,3 +521,62 @@ def standardize_column_names(
 
     # Update type_map keys is handled in the orchestrator
     return df
+
+# ══════════════════════════════════════════════════════════════════
+# STAGE 8 — Data quality scoring
+# ══════════════════════════════════════════════════════════════════
+
+def compute_quality_score(
+    original_df:   pd.DataFrame,
+    cleaned_df:    pd.DataFrame,
+    outlier_infos: List[OutlierInfo],
+    type_map:      Dict[str, str],
+) -> Tuple[float, str]:
+    """
+    Compute a 0–100 quality score for the cleaned dataset.
+
+    The score reflects how clean the data was BEFORE cleaning
+    (i.e. how much work was needed). A high score means the
+    raw data was already in good shape.
+
+    Formula:
+        score = 100
+              - (null_rate   × 35)
+              - (dup_rate    × 25)
+              - (outlier_rate × 20)
+              - (type_penalty × 20)
+        clamped to [0, 100]
+    """
+    total_cells  = original_df.shape[0] * original_df.shape[1]
+    total_nulls  = int(original_df.isna().sum().sum())
+    null_rate    = total_nulls / max(total_cells, 1)
+
+    dup_count = int(original_df.duplicated().sum())
+    dup_rate  = dup_count / max(len(original_df), 1)
+
+    total_outliers = sum(o.outlier_count for o in outlier_infos)
+    outlier_rate   = total_outliers / max(len(original_df), 1)
+
+    # Type penalty: ratio of columns that stayed as "string" (not inferred)
+    total_cols  = len(type_map)
+    string_cols = sum(1 for t in type_map.values() if t == "string")
+    type_penalty = string_cols / max(total_cols, 1)
+
+    raw_score = (
+        100
+        - (null_rate    * 35)
+        - (dup_rate     * 25)
+        - (outlier_rate * 20)
+        - (type_penalty * 20)
+    )
+    score = round(max(0.0, min(100.0, raw_score)), 1)
+
+    grade = (
+        "A" if score >= 90 else
+        "B" if score >= 75 else
+        "C" if score >= 60 else
+        "D" if score >= 45 else
+        "F"
+    )
+
+    return score, grade
