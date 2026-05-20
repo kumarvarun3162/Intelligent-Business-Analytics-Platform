@@ -580,3 +580,106 @@ def compute_quality_score(
     )
 
     return score, grade
+
+# ══════════════════════════════════════════════════════════════════
+# MASTER ORCHESTRATOR — called by the /api/clean route
+# ══════════════════════════════════════════════════════════════════
+
+def run_cleaning_pipeline(
+    df:         pd.DataFrame,
+    session_id: str,
+    outlier_method: str = "iqr",
+    outlier_action: str = "cap",
+    null_drop_threshold: float = 0.5,
+) -> Tuple[pd.DataFrame, CleaningReport]:
+    """
+    Run all 8 cleaning stages in sequence.
+    Returns the cleaned DataFrame and a full CleaningReport.
+
+    The orchestrator is intentionally thin — it delegates to
+    stage functions and collects their audit trail.
+    """
+    actions: List[CleaningAction] = []
+
+    # Snapshot before cleaning
+    original_df       = df.copy()
+    original_rows     = len(df)
+    original_cols     = len(df.columns)
+    total_nulls_before = int(df.isna().sum().sum())
+
+    # ── Stage 1: Type inference ──────────────────────────────────
+    df, type_map = infer_and_cast_types(df, actions)
+
+    # ── Stage 2: Missing values ──────────────────────────────────
+    df = handle_missing_values(df, actions, type_map, null_drop_threshold)
+
+    # ── Stage 3: Duplicates ──────────────────────────────────────
+    df = remove_duplicates(df, actions)
+
+    # ── Stage 4: Outliers ────────────────────────────────────────
+    df, outlier_infos = detect_and_handle_outliers(
+        df, actions, type_map, outlier_method, outlier_action
+    )
+
+    # ── Stage 5: String normalization ────────────────────────────
+    df = normalize_strings(df, actions, type_map)
+
+    # ── Stage 6: Constant column removal ─────────────────────────
+    df = remove_constant_columns(df, actions)
+
+    # ── Stage 7: Column name standardization ─────────────────────
+    df = standardize_column_names(df, actions)
+
+    # Update type_map keys after column renaming
+    old_cols = list(original_df.columns)
+    new_cols = list(df.columns)
+    name_map = dict(zip(
+        [standardize_col_name(c) for c in old_cols],
+        new_cols
+    ))
+    type_map = {
+        name_map.get(k, k): v
+        for k, v in type_map.items()
+        if name_map.get(k, k) in df.columns
+    }
+
+    # ── Stage 8: Quality score ───────────────────────────────────
+    quality_score, quality_grade = compute_quality_score(
+        original_df, df, outlier_infos, type_map
+    )
+
+    total_nulls_after = int(df.isna().sum().sum())
+    dups_removed      = sum(
+        a.rows_affected for a in actions
+        if a.action == "removed_exact_duplicates"
+    )
+
+    report = CleaningReport(
+        session_id          = session_id,
+        original_row_count  = original_rows,
+        cleaned_row_count   = len(df),
+        original_col_count  = original_cols,
+        cleaned_col_count   = len(df.columns),
+        rows_removed        = original_rows - len(df),
+        cols_removed        = original_cols - len(df.columns),
+        total_nulls_before  = total_nulls_before,
+        total_nulls_after   = total_nulls_after,
+        duplicates_removed  = dups_removed,
+        outliers_detected   = sum(o.outlier_count for o in outlier_infos),
+        quality_score       = quality_score,
+        quality_grade       = quality_grade,
+        actions             = actions,
+        outlier_details     = outlier_infos,
+        column_type_map     = type_map,
+    )
+
+    return df, report
+
+
+def standardize_col_name(col: str) -> str:
+    """Standalone helper — mirrors Stage 7 logic for a single name."""
+    name = re.sub(r"[^a-zA-Z0-9]", "_", str(col).strip()).lower()
+    name = re.sub(r"_+", "_", name).strip("_")
+    if name and name[0].isdigit():
+        name = "col_" + name
+    return name or "col"
