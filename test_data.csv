@@ -1,7 +1,8 @@
-name,age,city,salary
-Alice,30,Delhi,50000
-Bob,25,Mumbai,45000
-Charlie,,Bangalore,60000
-Alice,30,Delhi,50000
-David,35,Chennai,
-Eve,28,Hyderabad,55000
+First Name,Age,Revenue ($),  City  ,Status,Notes
+Alice,25,50000,New York,yes,good
+Alice,25,50000,New York,yes,good
+Bob,999,30000,chicago,no,
+Carol,,75000,  Los Angeles ,yes,n/a
+Dave,35,9999999,Boston,TRUE,excellent
+,28,45000,,,
+Eve,31,52000,Seattle,yes,ok
