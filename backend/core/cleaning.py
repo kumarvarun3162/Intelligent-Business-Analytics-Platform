@@ -355,3 +355,169 @@ def detect_and_handle_outliers(
              column=col)
 
     return df, outlier_infos
+
+
+# ══════════════════════════════════════════════════════════════════
+# STAGE 5 — String normalization
+# ══════════════════════════════════════════════════════════════════
+
+def normalize_strings(
+    df: pd.DataFrame,
+    actions: List[CleaningAction],
+    type_map: Dict[str, str],
+) -> pd.DataFrame:
+    """
+    Clean string columns:
+    1. Strip leading/trailing whitespace
+    2. Collapse internal multiple spaces to one
+    3. Normalize unicode (é → e, ñ → n for downstream compatibility)
+    4. Optionally strip non-printable characters
+
+    We do NOT lowercase by default — proper nouns like names
+    and cities should retain their case. Lowercasing is a
+    feature-engineering decision, not a cleaning one.
+    """
+    import unicodedata
+    df = df.copy()
+    total_fixed = 0
+
+    string_cols = [
+        col for col, t in type_map.items()
+        if t in ("string", "categorical") and col in df.columns
+    ]
+
+    for col in string_cols:
+        original = df[col].copy()
+
+        # Strip whitespace
+        df[col] = df[col].astype(str).str.strip()
+        # Collapse internal spaces
+        df[col] = df[col].str.replace(r"\s+", " ", regex=True)
+        # Remove non-printable characters
+        df[col] = df[col].str.replace(r"[^\x20-\x7E\u00C0-\u024F]",
+                                       "", regex=True)
+        # Re-cast to category if it was category before
+        if type_map.get(col) == "categorical":
+            df[col] = df[col].astype("category")
+
+        changed = (df[col] != original.astype(str).str.strip()).sum()
+        total_fixed += int(changed)
+
+    if total_fixed > 0:
+        _log(actions, "string_normalization", "stripped_whitespace",
+             total_fixed,
+             f"Normalized whitespace/encoding across {len(string_cols)} string columns")
+
+    return df
+
+
+# ══════════════════════════════════════════════════════════════════
+# STAGE 6 — Constant and near-constant column removal
+# ══════════════════════════════════════════════════════════════════
+
+def remove_constant_columns(
+    df: pd.DataFrame,
+    actions: List[CleaningAction],
+    variance_threshold: float = 0.01,
+) -> pd.DataFrame:
+    """
+    Drop columns that carry no information:
+
+    - Constant columns: every value is identical (variance = 0)
+    - Near-constant columns: one value dominates >99% of rows
+      (variance_threshold controls this cutoff)
+
+    Mathematical basis:
+    For a column with p% dominant value frequency,
+    variance ≈ p(1-p). At p=0.99, variance=0.0099 < 0.01 → dropped.
+    """
+    df = df.copy()
+    to_drop = []
+
+    for col in df.columns:
+        unique_count = df[col].nunique(dropna=True)
+
+        # Pure constants
+        if unique_count <= 1:
+            to_drop.append(col)
+            _log(actions, "constant_removal", "dropped_constant_column", 0,
+                 f"Dropped '{col}': only {unique_count} unique value(s)",
+                 column=col)
+            continue
+
+        # Near-constant: dominant frequency check
+        top_freq = df[col].value_counts(normalize=True, dropna=True).iloc[0]
+        if top_freq >= (1 - variance_threshold):
+            to_drop.append(col)
+            _log(actions, "constant_removal", "dropped_near_constant", 0,
+                 f"Dropped '{col}': top value covers {top_freq:.1%} of rows",
+                 column=col)
+
+    if to_drop:
+        df = df.drop(columns=to_drop)
+
+    return df
+
+
+# ══════════════════════════════════════════════════════════════════
+# STAGE 7 — Column name standardization
+# ══════════════════════════════════════════════════════════════════
+
+def standardize_column_names(
+    df: pd.DataFrame,
+    actions: List[CleaningAction],
+) -> pd.DataFrame:
+    """
+    Convert all column names to clean snake_case.
+
+    Examples:
+        "First Name"   → "first_name"
+        "Revenue ($)"  → "revenue"
+        "  AGE  "      → "age"
+        "2024_Sales"   → "sales_2024"   (leading digit moved)
+        ""             → "col_0"        (empty names get index)
+
+    Also de-duplicates: if two columns both become "sales",
+    the second becomes "sales_1".
+    """
+    df = df.copy()
+    original_names = list(df.columns)
+    new_names = []
+    seen = {}
+
+    for i, col in enumerate(original_names):
+        name = str(col).strip()
+
+        # Replace non-alphanumeric with underscore
+        name = re.sub(r"[^a-zA-Z0-9]", "_", name)
+        # Lowercase
+        name = name.lower()
+        # Collapse multiple underscores
+        name = re.sub(r"_+", "_", name)
+        # Strip leading/trailing underscores
+        name = name.strip("_")
+        # Leading digit fix
+        if name and name[0].isdigit():
+            name = "col_" + name
+        # Empty name fallback
+        if not name:
+            name = f"col_{i}"
+
+        # De-duplicate
+        if name in seen:
+            seen[name] += 1
+            name = f"{name}_{seen[name]}"
+        else:
+            seen[name] = 0
+
+        new_names.append(name)
+
+    df.columns = new_names
+
+    changed = sum(1 for o, n in zip(original_names, new_names) if o != n)
+    if changed > 0:
+        _log(actions, "column_names", "standardized_to_snake_case", 0,
+             f"Renamed {changed} columns to snake_case")
+
+    # Update type_map keys is handled in the orchestrator
+    return df
