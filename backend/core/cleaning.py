@@ -226,3 +226,132 @@ def handle_missing_values(
         df = df.drop(columns=cols_to_drop)
 
     return df
+
+
+# ══════════════════════════════════════════════════════════════════
+# STAGE 3 — Duplicate removal
+# ══════════════════════════════════════════════════════════════════
+
+def remove_duplicates(
+    df: pd.DataFrame,
+    actions: List[CleaningAction],
+) -> pd.DataFrame:
+    """
+    Remove duplicate rows from the DataFrame.
+
+    We use two passes:
+    1. Exact duplicates (all columns identical)
+    2. Near-duplicates on numeric columns only (unlikely to be needed
+       in Phase 2, but the hook is here for Phase 3 fuzzy matching)
+    """
+    df = df.copy()
+    original_len = len(df)
+
+    # Pass 1: exact row duplicates
+    df = df.drop_duplicates(keep="first")
+    exact_removed = original_len - len(df)
+
+    if exact_removed > 0:
+        _log(actions, "duplicates", "removed_exact_duplicates", exact_removed,
+             f"Removed {exact_removed} exact duplicate rows (kept first occurrence)")
+
+    return df
+
+
+# ══════════════════════════════════════════════════════════════════
+# STAGE 4 — Outlier detection and handling
+# ══════════════════════════════════════════════════════════════════
+
+def detect_and_handle_outliers(
+    df: pd.DataFrame,
+    actions: List[CleaningAction],
+    type_map: Dict[str, str],
+    method: str = "iqr",
+    action: str = "cap",
+) -> Tuple[pd.DataFrame, List[OutlierInfo]]:
+    """
+    Detect outliers in numeric columns and handle them.
+
+    Parameters
+    ----------
+    method : "iqr" or "zscore"
+        IQR is robust and non-parametric (default).
+        Z-score assumes normality (mean=0, std=1).
+
+    action : "cap", "flag", or "drop"
+        cap  → Winsorize: replace outlier values with the fence value.
+               This preserves the row but limits extreme influence.
+        flag → Add a boolean column '{col}_is_outlier'. Row is kept as-is.
+        drop → Remove rows containing outliers. Use cautiously.
+
+    Why "cap" is the safest default:
+    Dropping outliers loses information. Flagging keeps data dirty.
+    Capping (Winsorization) keeps every row but limits extreme values,
+    which is what most ML algorithms benefit from.
+    """
+    df = df.copy()
+    outlier_infos: List[OutlierInfo] = []
+
+    numeric_cols = [
+        col for col, t in type_map.items()
+        if t in ("integer", "float") and col in df.columns
+    ]
+
+    for col in numeric_cols:
+        series = df[col].dropna()
+        if len(series) < 10:
+            # Too few points to meaningfully detect outliers
+            continue
+
+        if method == "iqr":
+            Q1 = series.quantile(0.25)
+            Q3 = series.quantile(0.75)
+            IQR = Q3 - Q1
+            if IQR == 0:
+                continue  # All values are the same; no spread to analyze
+            lower = Q1 - 1.5 * IQR
+            upper = Q3 + 1.5 * IQR
+
+        elif method == "zscore":
+            mean = series.mean()
+            std  = series.std()
+            if std == 0:
+                continue
+            lower = mean - 3 * std
+            upper = mean + 3 * std
+        else:
+            raise ValueError(f"Unknown outlier method: {method}")
+
+        outlier_mask = (df[col] < lower) | (df[col] > upper)
+        outlier_count = int(outlier_mask.sum())
+
+        if outlier_count == 0:
+            continue
+
+        # Apply the chosen action
+        if action == "cap":
+            df[col] = df[col].clip(lower=lower, upper=upper)
+            action_taken = "capped"
+        elif action == "flag":
+            df[f"{col}_is_outlier"] = outlier_mask.astype(int)
+            action_taken = "flagged"
+        elif action == "drop":
+            df = df[~outlier_mask]
+            action_taken = "dropped"
+        else:
+            action_taken = "none"
+
+        outlier_infos.append(OutlierInfo(
+            column        = col,
+            method        = method,
+            outlier_count = outlier_count,
+            lower_bound   = round(float(lower), 4),
+            upper_bound   = round(float(upper), 4),
+            action_taken  = action_taken,
+        ))
+
+        _log(actions, "outliers", f"outlier_{action_taken}", outlier_count,
+             f"{col}: {outlier_count} outliers [{lower:.4g}, {upper:.4g}] → {action_taken}",
+             column=col)
+
+    return df, outlier_infos
