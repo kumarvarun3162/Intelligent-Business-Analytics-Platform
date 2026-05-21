@@ -222,3 +222,153 @@ def scale_numerics(
         type_map[col] = "float"
 
     return df
+
+# ══════════════════════════════════════════════════════════════════
+# STAGE 3 — Datetime feature extraction
+# ══════════════════════════════════════════════════════════════════
+
+def extract_datetime_features(
+    df: pd.DataFrame,
+    transforms: List[TransformRecord],
+    type_map: Dict[str, str],
+    drop_original: bool = False,
+) -> pd.DataFrame:
+    """
+    Decompose datetime columns into interpretable numeric parts.
+
+    Extracted parts per datetime column:
+    ┌──────────────┬──────────────────────────────────────────┐
+    │ {col}_year   │ Full year (2023)                         │
+    │ {col}_month  │ 1–12                                     │
+    │ {col}_day    │ 1–31                                     │
+    │ {col}_weekday│ 0=Mon … 6=Sun                            │
+    │ {col}_hour   │ 0–23 (0 if no time component)            │
+    │ {col}_quarter│ 1–4                                      │
+    │ {col}_is_wknd│ 1 if Sat or Sun, else 0                  │
+    └──────────────┴──────────────────────────────────────────┘
+
+    drop_original: if True, remove the original datetime column
+    after extraction. Useful for ML pipelines that need pure numerics.
+    """
+    df = df.copy()
+    datetime_cols = [
+        col for col, t in type_map.items()
+        if t == "datetime" and col in df.columns
+    ]
+
+    for col in datetime_cols:
+        original_dtype = str(df[col].dtype)
+        dt = pd.to_datetime(df[col], errors="coerce")
+
+        new_cols = {}
+        new_cols[f"{col}_year"]    = dt.dt.year
+        new_cols[f"{col}_month"]   = dt.dt.month
+        new_cols[f"{col}_day"]     = dt.dt.day
+        new_cols[f"{col}_weekday"] = dt.dt.weekday          # 0=Mon
+        new_cols[f"{col}_hour"]    = dt.dt.hour
+        new_cols[f"{col}_quarter"] = dt.dt.quarter
+        new_cols[f"{col}_is_wknd"] = (dt.dt.weekday >= 5).astype(int)
+
+        for new_col, values in new_cols.items():
+            df[new_col] = values.astype("Int64")
+            type_map[new_col] = "integer"
+
+        created = list(new_cols.keys())
+        _record(transforms, col, "datetime_extract",
+                {"parts": created, "drop_original": drop_original},
+                created, original_dtype, "int64",
+                f"Extracted {len(created)} features from datetime '{col}'")
+
+        if drop_original:
+            df = df.drop(columns=[col])
+            del type_map[col]
+
+    return df
+
+
+# ══════════════════════════════════════════════════════════════════
+# STAGE 4 — Binning and discretization
+# ══════════════════════════════════════════════════════════════════
+
+def bin_numerics(
+    df: pd.DataFrame,
+    transforms: List[TransformRecord],
+    type_map: Dict[str, str],
+    n_bins: int = 5,
+    strategy: str = "quantile",
+    cols_to_bin: List[str] = None,
+) -> pd.DataFrame:
+    """
+    Discretize continuous numeric columns into labelled bins.
+
+    strategy:
+    - "quantile"    → equal-frequency bins (recommended default)
+    - "uniform"     → equal-width bins
+
+    We only bin columns with high cardinality (>20 unique values)
+    by default. Binning a column with 3 unique values is pointless.
+
+    New column naming: {col}_bin  (original column is kept)
+
+    Why keep the original?
+    Binning creates a new perspective on the data, but the original
+    continuous column still has value. We add both to the DataFrame.
+    The user can drop originals in Phase 6 export if needed.
+    """
+    df = df.copy()
+
+    if cols_to_bin is None:
+        # Auto-select: high-cardinality numeric columns
+        cols_to_bin = [
+            col for col, t in type_map.items()
+            if t in ("integer", "float")
+            and col in df.columns
+            and df[col].nunique() > 20
+        ]
+
+    bin_labels = [f"q{i+1}" for i in range(n_bins)]  # q1, q2, q3, q4, q5
+
+    for col in cols_to_bin:
+        if col not in df.columns:
+            continue
+        original_dtype = str(df[col].dtype)
+        new_col = f"{col}_bin"
+
+        try:
+            if strategy == "quantile":
+                # duplicates="drop" handles cases where quantile edges overlap
+                binned = pd.qcut(
+                    df[col], q=n_bins,
+                    labels=bin_labels[:n_bins],
+                    duplicates="drop"
+                )
+            else:
+                binned = pd.cut(
+                    df[col], bins=n_bins,
+                    labels=bin_labels[:n_bins],
+                )
+
+            df[new_col]      = binned.astype(str)
+            type_map[new_col] = "categorical"
+
+            # Record actual bin edges for the manifest
+            if strategy == "quantile":
+                edges = list(pd.qcut(df[col], q=n_bins,
+                                     duplicates="drop", retbins=True)[1])
+            else:
+                edges = list(pd.cut(df[col], bins=n_bins, retbins=True)[1])
+
+            _record(transforms, col, f"bin_{strategy}",
+                    {"n_bins": n_bins,
+                     "edges": [round(float(e), 4) for e in edges],
+                     "labels": bin_labels[:n_bins]},
+                    [new_col], original_dtype, "category",
+                    f"Binned '{col}' → '{new_col}' "
+                    f"({strategy}, {n_bins} bins)")
+
+        except Exception as e:
+            # Silently skip columns that can't be binned
+            # (e.g. too many duplicate values for quantile cuts)
+            continue
+
+    return df
