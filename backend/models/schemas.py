@@ -104,3 +104,45 @@ class CleaningResponse(BaseModel):
     message:        str
     report:         Optional[CleaningReport] = None
     preview:        Optional[List[Dict[str, Any]]] = None  # first 10 cleaned rows
+
+    
+class TransformRecord(BaseModel):
+    """
+    Records one transformation applied to one column.
+    Contains enough information to replay the transform on new data.
+    """
+    column:        str
+    transform:     str          # e.g. "one_hot", "minmax_scale", "log_transform"
+    params:        Dict[str, Any]  # e.g. {"min": 0.0, "max": 100.0}
+    new_columns:   List[str]    # columns created (may be multiple for one-hot)
+    original_dtype: str
+    output_dtype:  str
+    note:          str          # human-readable explanation
+
+
+class ValidationRule(BaseModel):
+    """A single validation rule applied to a column."""
+    column:  str
+    rule:    str          # e.g. "range_check", "no_nulls", "unique_values"
+    passed:  bool
+    detail:  str
+
+
+class EngineeringReport(BaseModel):
+    """Full report returned after the engineering pipeline runs."""
+    session_id:         str
+    original_col_count: int
+    engineered_col_count: int
+    new_cols_created:   int
+    transforms:         List[TransformRecord]
+    validation_results: List[ValidationRule]
+    validation_passed:  bool
+    feature_summary:    Dict[str, str]  # col → final type label
+    ml_ready:           bool            # True if no nulls, all numeric/bool
+
+
+class EngineeringResponse(BaseModel):
+    success:  bool
+    message:  str
+    report:   Optional[EngineeringReport] = None
+    preview:  Optional[List[Dict[str, Any]]] = None
