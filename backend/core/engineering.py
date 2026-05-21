@@ -125,3 +125,100 @@ def encode_categoricals(
             type_map[col] = "float"
 
     return df
+
+# ══════════════════════════════════════════════════════════════════
+# STAGE 2 — Numeric scaling
+# ══════════════════════════════════════════════════════════════════
+
+def scale_numerics(
+    df: pd.DataFrame,
+    transforms: List[TransformRecord],
+    type_map: Dict[str, str],
+    method: str = "auto",
+) -> pd.DataFrame:
+    """
+    Scale numeric columns.
+
+    method options:
+    - "auto"    → use the decision tree (robust if outliers, else minmax)
+    - "minmax"  → force min-max for all numeric columns
+    - "standard"→ force Z-score standardisation
+    - "robust"  → force robust (median/IQR) scaling
+    - "none"    → skip scaling entirely
+
+    Why scaling matters:
+    Without scaling, a column with values [0, 1] and a column with
+    values [0, 1,000,000] will have the million-dollar column dominate
+    distance-based algorithms (k-means, KNN, SVM) purely because of
+    its magnitude — not because it's more important.
+    """
+    if method == "none":
+        return df
+
+    df = df.copy()
+    numeric_cols = [
+        col for col, t in type_map.items()
+        if t in ("integer", "float") and col in df.columns
+    ]
+
+    for col in numeric_cols:
+        series = df[col].dropna()
+        if len(series) < 2:
+            continue
+
+        original_dtype = str(df[col].dtype)
+
+        # ── Auto-detect: check for outliers via IQR ─────────────
+        Q1  = series.quantile(0.25)
+        Q3  = series.quantile(0.75)
+        IQR = Q3 - Q1
+        has_outliers = False
+        if IQR > 0:
+            lower = Q1 - 1.5 * IQR
+            upper = Q3 + 1.5 * IQR
+            has_outliers = bool(((series < lower) | (series > upper)).any())
+
+        chosen = method
+        if method == "auto":
+            chosen = "robust" if has_outliers else "minmax"
+
+        # ── Apply chosen scaler ──────────────────────────────────
+
+        if chosen == "minmax":
+            col_min = float(series.min())
+            col_max = float(series.max())
+            denom   = col_max - col_min
+            if denom == 0:
+                continue  # constant column — skip
+            df[col] = (df[col] - col_min) / denom
+            _record(transforms, col, "minmax_scale",
+                    {"min": round(col_min, 6), "max": round(col_max, 6)},
+                    [col], original_dtype, "float64",
+                    f"Min-max scaled '{col}' → [0, 1] "
+                    f"(was [{col_min:.4g}, {col_max:.4g}])")
+
+        elif chosen == "standard":
+            mean = float(series.mean())
+            std  = float(series.std())
+            if std == 0:
+                continue
+            df[col] = (df[col] - mean) / std
+            _record(transforms, col, "standard_scale",
+                    {"mean": round(mean, 6), "std": round(std, 6)},
+                    [col], original_dtype, "float64",
+                    f"Z-score scaled '{col}' → mean=0, std=1")
+
+        elif chosen == "robust":
+            median = float(series.median())
+            iqr    = float(IQR)
+            if iqr == 0:
+                continue
+            df[col] = (df[col] - median) / iqr
+            _record(transforms, col, "robust_scale",
+                    {"median": round(median, 6), "iqr": round(iqr, 6)},
+                    [col], original_dtype, "float64",
+                    f"Robust scaled '{col}' using median={median:.4g}, IQR={iqr:.4g}")
+
+        type_map[col] = "float"
+
+    return df
