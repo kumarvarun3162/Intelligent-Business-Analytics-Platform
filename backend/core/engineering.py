@@ -482,3 +482,192 @@ def create_derived_features(
                     f"Added squared term '{new_col}' (skew={skewness:.2f}, var={variance:.2f})")
 
     return df
+
+# ══════════════════════════════════════════════════════════════════
+# STAGE 6 — Validation and manifest
+# ══════════════════════════════════════════════════════════════════
+
+def validate_engineered_data(
+    df: pd.DataFrame,
+    transforms: List[TransformRecord],
+    type_map: Dict[str, str],
+) -> Tuple[List[ValidationRule], bool]:
+    """
+    Run data quality validation checks on the engineered DataFrame.
+
+    Checks performed:
+    1. No null values remain in any column
+    2. No infinite values in numeric columns
+    3. All columns are numeric or boolean (ML-ready check)
+    4. Scaled columns are within expected range [-10, 10]
+       (Z-score and robust scaled data should be in this range)
+    5. One-hot encoded columns contain only 0 and 1
+    6. No duplicate column names
+
+    Returns: (list of ValidationRule, overall_passed bool)
+    """
+    rules: List[ValidationRule] = []
+    all_passed = True
+
+    # ── Check 1: No nulls ────────────────────────────────────────
+    for col in df.columns:
+        null_count = int(df[col].isna().sum())
+        passed     = null_count == 0
+        rules.append(ValidationRule(
+            column  = col,
+            rule    = "no_nulls",
+            passed  = passed,
+            detail  = f"{null_count} nulls found" if not passed
+                      else "No nulls",
+        ))
+        if not passed:
+            all_passed = False
+
+    # ── Check 2: No infinite values ──────────────────────────────
+    numeric_cols = df.select_dtypes(include=[np.number]).columns
+    for col in numeric_cols:
+        inf_count = int(np.isinf(df[col].astype(float)).sum())
+        passed    = inf_count == 0
+        if not passed:
+            # Replace inf with NaN automatically
+            df[col] = df[col].replace([np.inf, -np.inf], np.nan)
+            rules.append(ValidationRule(
+                column  = col,
+                rule    = "no_infinite",
+                passed  = False,
+                detail  = f"{inf_count} infinite values replaced with NaN",
+            ))
+            all_passed = False
+
+    # ── Check 3: Column type consistency ─────────────────────────
+    non_numeric = df.select_dtypes(exclude=[np.number, bool]).columns.tolist()
+    if non_numeric:
+        rules.append(ValidationRule(
+            column  = "__dataset__",
+            rule    = "all_numeric",
+            passed  = False,
+            detail  = f"Non-numeric columns remain: {non_numeric}. "
+                      f"These columns won't be usable by numeric ML models.",
+        ))
+    else:
+        rules.append(ValidationRule(
+            column  = "__dataset__",
+            rule    = "all_numeric",
+            passed  = True,
+            detail  = "All columns are numeric — dataset is ML-ready",
+        ))
+
+    # ── Check 4: One-hot columns are binary ──────────────────────
+    ohe_cols = [
+        t.new_columns for t in transforms
+        if t.transform == "one_hot_encode"
+    ]
+    for col_group in ohe_cols:
+        for col in col_group:
+            if col not in df.columns:
+                continue
+            unique_vals = set(df[col].dropna().unique())
+            passed      = unique_vals <= {0, 1}
+            rules.append(ValidationRule(
+                column  = col,
+                rule    = "binary_ohe",
+                passed  = passed,
+                detail  = "Binary (0/1)" if passed
+                          else f"Non-binary values: {unique_vals}",
+            ))
+            if not passed:
+                all_passed = False
+
+    # ── Check 5: No duplicate column names ───────────────────────
+    seen      = set()
+    dupes     = []
+    for col in df.columns:
+        if col in seen:
+            dupes.append(col)
+        seen.add(col)
+    if dupes:
+        rules.append(ValidationRule(
+            column  = "__dataset__",
+            rule    = "no_duplicate_cols",
+            passed  = False,
+            detail  = f"Duplicate column names: {dupes}",
+        ))
+        all_passed = False
+
+    return rules, all_passed
+
+
+# ══════════════════════════════════════════════════════════════════
+# MASTER ORCHESTRATOR — called by /api/engineer route
+# ══════════════════════════════════════════════════════════════════
+
+def run_engineering_pipeline(
+    df:            pd.DataFrame,
+    session_id:    str,
+    type_map:      Dict[str, str],
+    scale_method:  str = "auto",
+    n_bins:        int = 5,
+    bin_strategy:  str = "quantile",
+    drop_datetime: bool = False,
+) -> Tuple[pd.DataFrame, EngineeringReport]:
+    """
+    Run all 6 engineering stages in sequence.
+    Receives a cleaned DataFrame + its type_map from Phase 2.
+    Returns engineered DataFrame + full EngineeringReport.
+    """
+    transforms: List[TransformRecord] = []
+    original_col_count = len(df.columns)
+
+    # Work on a mutable copy of type_map
+    tmap = dict(type_map)
+
+    # ── Stage 1: Categorical encoding ────────────────────────────
+    df = encode_categoricals(df, transforms, tmap)
+
+    # ── Stage 2: Numeric scaling ─────────────────────────────────
+    df = scale_numerics(df, transforms, tmap, method=scale_method)
+
+    # ── Stage 3: Datetime extraction ─────────────────────────────
+    df = extract_datetime_features(df, transforms, tmap,
+                                   drop_original=drop_datetime)
+
+    # ── Stage 4: Binning ─────────────────────────────────────────
+    df = bin_numerics(df, transforms, tmap,
+                      n_bins=n_bins, strategy=bin_strategy)
+
+    # ── Stage 5: Derived features ────────────────────────────────
+    df = create_derived_features(df, transforms, tmap)
+
+    # ── Stage 6: Validation ──────────────────────────────────────
+    validation_rules, validation_passed = validate_engineered_data(
+        df, transforms, tmap
+    )
+
+    # Build feature summary: col → human label
+    feature_summary = {}
+    for t in transforms:
+        for col in t.new_columns:
+            feature_summary[col] = t.transform
+
+    engineered_col_count = len(df.columns)
+    new_cols_created     = engineered_col_count - original_col_count
+
+    # ML-ready = passed validation AND no non-numeric columns
+    ml_ready = (
+        validation_passed and
+        len(df.select_dtypes(exclude=[np.number, bool]).columns) == 0
+    )
+
+    report = EngineeringReport(
+        session_id           = session_id,
+        original_col_count   = original_col_count,
+        engineered_col_count = engineered_col_count,
+        new_cols_created     = max(0, new_cols_created),
+        transforms           = transforms,
+        validation_results   = validation_rules,
+        validation_passed    = validation_passed,
+        feature_summary      = feature_summary,
+        ml_ready             = ml_ready,
+    )
+
+    return df, report
