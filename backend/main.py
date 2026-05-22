@@ -8,6 +8,8 @@ from storage.database import init_db
 from api.routes.upload import router as upload_router
 from api.routes.clean import router as clean_router
 
+from api.routes.engineer import router as engineer_router
+
 
 # ── Lifespan: runs once at startup and shutdown ──────────────────
 @asynccontextmanager
@@ -47,7 +49,7 @@ app.add_middleware(
 # ── Routers ──────────────────────────────────────────────────────
 app.include_router(upload_router)
 app.include_router(clean_router)
-
+app.include_router(engineer_router)
 
 # ── Health check ─────────────────────────────────────────────────
 @app.get("/health", tags=["system"])
