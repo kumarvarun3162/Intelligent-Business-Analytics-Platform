@@ -372,3 +372,113 @@ def bin_numerics(
             continue
 
     return df
+
+# ══════════════════════════════════════════════════════════════════
+# STAGE 5 — Derived feature creation
+# ══════════════════════════════════════════════════════════════════
+
+def create_derived_features(
+    df: pd.DataFrame,
+    transforms: List[TransformRecord],
+    type_map: Dict[str, str],
+) -> pd.DataFrame:
+    """
+    Automatically create derived features from numeric columns:
+
+    1. Log transforms for right-skewed columns (skewness > 1.0)
+    2. Ratio features for numeric column pairs that look related
+       by name (e.g. 'revenue' and 'cost' → profit_margin)
+    3. Polynomial features (x²) for columns with high variance
+       and no obvious outliers
+
+    All derived columns are named: {col}_log, {ratio}_ratio,
+    {col}_squared. Original columns are always kept.
+    """
+    df = df.copy()
+
+    numeric_cols = [
+        col for col, t in type_map.items()
+        if t in ("integer", "float") and col in df.columns
+    ]
+
+    # ── 1. Log transforms for skewed columns ────────────────────
+    for col in numeric_cols:
+        series = df[col].dropna()
+        if len(series) < 10:
+            continue
+
+        skewness = float(series.skew())
+
+        # Only log-transform if positively skewed and all-positive values
+        if skewness > 1.0 and series.min() > 0:
+            new_col = f"{col}_log"
+            df[new_col] = np.log1p(df[col])  # log1p = log(1+x) safe for x≥0
+            type_map[new_col] = "float"
+            _record(transforms, col, "log_transform",
+                    {"skewness": round(skewness, 4),
+                     "formula": "log(1 + x)"},
+                    [new_col], str(df[col].dtype), "float64",
+                    f"Log-transformed '{col}' (skewness={skewness:.2f}) → '{new_col}'")
+
+    # ── 2. Auto ratio detection by column name patterns ─────────
+    # We look for name pairs that suggest a ratio makes sense
+    RATIO_PAIRS = [
+        # (numerator_keyword, denominator_keyword, ratio_name)
+        ("profit",   "revenue",   "profit_margin"),
+        ("profit",   "cost",      "profit_margin"),
+        ("revenue",  "cost",      "revenue_cost_ratio"),
+        ("sales",    "cost",      "sales_cost_ratio"),
+        ("clicks",   "impressions", "ctr"),
+        ("orders",   "customers",  "orders_per_customer"),
+        ("returns",  "orders",    "return_rate"),
+        ("revenue",  "customers", "revenue_per_customer"),
+        ("salary",   "experience","salary_per_year"),
+    ]
+
+    col_set = set(numeric_cols)
+    for num_kw, den_kw, ratio_name in RATIO_PAIRS:
+        num_matches = [c for c in col_set if num_kw in c.lower()]
+        den_matches = [c for c in col_set if den_kw in c.lower()]
+
+        for num_col in num_matches:
+            for den_col in den_matches:
+                if num_col == den_col:
+                    continue
+                denom_series = df[den_col].replace(0, np.nan)
+                if denom_series.isna().all():
+                    continue
+                new_col = f"{ratio_name}"
+                if new_col in df.columns:
+                    new_col = f"{num_col}_div_{den_col}"
+                df[new_col] = df[num_col] / denom_series
+                type_map[new_col] = "float"
+                _record(transforms, num_col, "ratio_feature",
+                        {"numerator": num_col,
+                         "denominator": den_col},
+                        [new_col],
+                        str(df[num_col].dtype), "float64",
+                        f"Created ratio '{new_col}' = {num_col} / {den_col}")
+
+    # ── 3. Squared terms for low-skew high-variance columns ─────
+    for col in numeric_cols:
+        series = df[col].dropna()
+        if len(series) < 10:
+            continue
+
+        skewness = abs(float(series.skew()))
+        variance = float(series.var())
+
+        # Low skew (near-symmetric) + meaningful variance
+        # → polynomial term may help capture non-linear effects
+        if skewness < 0.5 and variance > 1.0:
+            new_col = f"{col}_squared"
+            df[new_col] = df[col] ** 2
+            type_map[new_col] = "float"
+            _record(transforms, col, "polynomial_feature",
+                    {"degree": 2,
+                     "skewness": round(skewness, 4),
+                     "variance": round(variance, 4)},
+                    [new_col], str(df[col].dtype), "float64",
+                    f"Added squared term '{new_col}' (skew={skewness:.2f}, var={variance:.2f})")
+
+    return df
