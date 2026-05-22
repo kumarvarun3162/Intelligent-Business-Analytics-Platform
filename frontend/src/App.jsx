@@ -4,10 +4,11 @@ import UploadZone from './components/Upload/UploadZone'
 import PreviewTable from './components/Upload/PreviewTable'
 import MetadataCard from './components/Upload/MetadataCard'
 import CleaningPanel from './components/Cleaning/CleaningPanel'
+import EngineeringPanel from './components/Engineering/EngineeringPanel'
 
 export default function App() {
   const [uploadResult, setUploadResult] = useState(null)
-  const [cleanResult, setCleanResult]   = useState(null)
+  const [cleanResult, setCleanResult] = useState(null)
 
   return (
     <div className="min-h-screen bg-gray-950 text-gray-100 p-8">
@@ -41,12 +42,18 @@ export default function App() {
             <PreviewTable
               columns={cleanResult.report.column_type_map
                 ? Object.entries(cleanResult.report.column_type_map).map(([name, dtype]) => ({
-                    name, dtype, null_count: 0, null_percentage: 0, unique_count: 0, sample_values: []
-                  }))
+                  name, dtype, null_count: 0, null_percentage: 0, unique_count: 0, sample_values: []
+                }))
                 : []}
               rows={cleanResult.preview}
             />
           </div>
+        )}
+        {uploadResult && cleanResult && (
+          <EngineeringPanel
+            sessionId={uploadResult.metadata.session_id}
+            onEngineered={(r) => console.log('Engineered:', r)}
+          />
         )}
       </main>
     </div>

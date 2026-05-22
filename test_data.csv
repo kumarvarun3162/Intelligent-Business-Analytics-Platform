@@ -1,8 +1,6 @@
-First Name,Age,Revenue ($),  City  ,Status,Notes
-Alice,25,50000,New York,yes,good
-Alice,25,50000,New York,yes,good
-Bob,999,30000,chicago,no,
-Carol,,75000,  Los Angeles ,yes,n/a
-Dave,35,9999999,Boston,TRUE,excellent
-,28,45000,,,
-Eve,31,52000,Seattle,yes,ok
+name,age,salary,city,join_date,status,revenue,cost
+Alice,28,75000,New York,2021-03-15,active,120000,80000
+Bob,34,92000,Chicago,2019-07-22,active,200000,130000
+Carol,25,61000,New York,2023-01-10,inactive,90000,70000
+Dave,45,115000,Seattle,2018-11-05,active,350000,200000
+Eve,31,78000,Boston,2022-05-18,active,145000,95000
