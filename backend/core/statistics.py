@@ -624,3 +624,44 @@ def generate_insights(
             )
 
     return insights, warnings
+
+# ══════════════════════════════════════════════════════════════════
+# MASTER ORCHESTRATOR
+# ══════════════════════════════════════════════════════════════════
+
+def run_analysis_pipeline(
+    df:         pd.DataFrame,
+    session_id: str,
+) -> InsightsReport:
+    """
+    Run all 6 analysis modules in sequence and assemble InsightsReport.
+    Gracefully handles failures in individual modules — one bad column
+    should never crash the whole analysis.
+    """
+    descriptive  = compute_descriptive_stats(df)
+    correlations = compute_correlations(df)
+    vif_results  = compute_vif(df)
+    distributions = analyze_distributions(df)
+    hyp_tests    = run_hypothesis_tests(df)
+    pca_result   = run_pca(df)
+    cat_freqs    = analyze_categorical_frequencies(df)
+
+    insights, warnings = generate_insights(
+        descriptive, correlations, distributions,
+        hyp_tests, pca_result, cat_freqs, vif_results,
+    )
+
+    return InsightsReport(
+        session_id       = session_id,
+        row_count        = len(df),
+        col_count        = len(df.columns),
+        descriptive      = descriptive,
+        correlations     = correlations,
+        vif_results      = vif_results,
+        distributions    = distributions,
+        hypothesis_tests = hyp_tests,
+        pca              = pca_result,
+        category_freqs   = cat_freqs,
+        key_insights     = insights,
+        warnings         = warnings,
+    )
