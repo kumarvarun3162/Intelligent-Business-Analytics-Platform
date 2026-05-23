@@ -281,3 +281,184 @@ def analyze_distributions(
         ))
 
     return results
+# ══════════════════════════════════════════════════════════════════
+# MODULE 4 — Hypothesis testing
+# ══════════════════════════════════════════════════════════════════
+
+def run_hypothesis_tests(
+    df: pd.DataFrame,
+    max_tests: int = 20,
+) -> List[HypothesisResult]:
+    """
+    Automatically select and run appropriate hypothesis tests.
+
+    Selection logic:
+    - Two categoricals with enough data → chi-square
+    - One categorical (≤8 groups) + one numeric → ANOVA or t-test
+    - Limits total tests to max_tests for performance
+
+    p-value interpretation:
+    p < 0.05 → reject null hypothesis → statistically significant
+    p ≥ 0.05 → fail to reject → no significant evidence of difference
+
+    Important: statistical significance ≠ practical significance.
+    We flag it but the user must judge practical importance.
+    """
+    results  = []
+    cat_cols = df.select_dtypes(include=["category", "object"]).columns.tolist()
+    num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+
+    # ── Chi-square: categorical pairs ───────────────────────────
+    for i in range(len(cat_cols)):
+        if len(results) >= max_tests:
+            break
+        for j in range(i + 1, len(cat_cols)):
+            if len(results) >= max_tests:
+                break
+            col_a, col_b = cat_cols[i], cat_cols[j]
+            try:
+                ct = pd.crosstab(df[col_a], df[col_b])
+                if ct.shape[0] < 2 or ct.shape[1] < 2:
+                    continue
+                chi2, p, dof, _ = scipy_stats.chi2_contingency(ct)
+                significant = bool(p < 0.05)
+                interp = (
+                    f"'{col_a}' and '{col_b}' are statistically dependent "
+                    f"(chi²={chi2:.2f}, p={p:.4f}) — they likely influence each other."
+                    if significant else
+                    f"No significant association between '{col_a}' and '{col_b}' "
+                    f"(p={p:.4f})."
+                )
+                results.append(HypothesisResult(
+                    test         = "chi_square",
+                    columns      = [col_a, col_b],
+                    statistic    = round(float(chi2), 4),
+                    p_value      = round(float(p), 4),
+                    significant  = significant,
+                    interpretation = interp,
+                ))
+            except Exception:
+                continue
+
+    # ── ANOVA / t-test: categorical × numeric ───────────────────
+    for cat in cat_cols:
+        if len(results) >= max_tests:
+            break
+        groups_series = df[cat].dropna()
+        n_groups = groups_series.nunique()
+        if n_groups < 2 or n_groups > 8:
+            continue
+
+        for num in num_cols[:5]:   # limit to first 5 numeric cols
+            if len(results) >= max_tests:
+                break
+            try:
+                groups = [
+                    df.loc[df[cat] == g, num].dropna().values
+                    for g in df[cat].dropna().unique()
+                    if len(df.loc[df[cat] == g, num].dropna()) >= 3
+                ]
+                if len(groups) < 2:
+                    continue
+
+                if len(groups) == 2:
+                    # t-test for exactly two groups
+                    stat, p = scipy_stats.ttest_ind(groups[0], groups[1])
+                    test_name = "t_test"
+                    interp_sig = (
+                        f"'{num}' differs significantly between the two "
+                        f"'{cat}' groups (t={stat:.2f}, p={p:.4f})."
+                    )
+                    interp_ns = (
+                        f"No significant difference in '{num}' between "
+                        f"'{cat}' groups (p={p:.4f})."
+                    )
+                else:
+                    # One-way ANOVA for 3+ groups
+                    stat, p = scipy_stats.f_oneway(*groups)
+                    test_name = "anova"
+                    interp_sig = (
+                        f"'{num}' varies significantly across '{cat}' groups "
+                        f"(F={stat:.2f}, p={p:.4f}) — '{cat}' may explain '{num}'."
+                    )
+                    interp_ns = (
+                        f"No significant difference in '{num}' across "
+                        f"'{cat}' groups (p={p:.4f})."
+                    )
+
+                significant = bool(p < 0.05)
+                results.append(HypothesisResult(
+                    test           = test_name,
+                    columns        = [cat, num],
+                    statistic      = round(float(stat), 4),
+                    p_value        = round(float(p), 4),
+                    significant    = significant,
+                    interpretation = interp_sig if significant else interp_ns,
+                ))
+            except Exception:
+                continue
+
+    return results
+
+
+# ══════════════════════════════════════════════════════════════════
+# MODULE 5 — PCA (Principal Component Analysis)
+# ══════════════════════════════════════════════════════════════════
+
+def run_pca(
+    df: pd.DataFrame,
+    n_components: int = None,
+) -> Optional[PCAResult]:
+    """
+    Run PCA on all numeric columns.
+
+    Requires at least 3 numeric columns and 10 rows.
+
+    The scree plot data (explained_variance per component) drives the
+    interactive chart in Phase 5.
+
+    Top features per component: we take the 3 columns with the highest
+    absolute loading (contribution) to each principal component.
+    """
+    from sklearn.preprocessing import StandardScaler
+    from sklearn.decomposition import PCA
+
+    numeric_df = df.select_dtypes(include=[np.number]).dropna()
+    cols = numeric_df.columns.tolist()
+
+    if len(cols) < 3 or len(numeric_df) < 10:
+        return None
+
+    # PCA requires standardised input — each column mean=0, std=1
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(numeric_df)
+
+    # Default: keep enough components to explain 95% of variance
+    max_components = min(len(cols), len(numeric_df) - 1)
+    pca = PCA(n_components=n_components or max_components, random_state=42)
+    pca.fit(X_scaled)
+
+    explained       = [round(float(v), 4) for v in pca.explained_variance_ratio_]
+    cumulative      = []
+    running         = 0.0
+    components_90   = max_components
+    for i, v in enumerate(explained):
+        running += v
+        cumulative.append(round(running, 4))
+        if running >= 0.90 and components_90 == max_components:
+            components_90 = i + 1
+
+    # Top 3 feature contributors per component
+    top_features: Dict[str, List[str]] = {}
+    for i, component in enumerate(pca.components_):
+        abs_loadings = np.abs(component)
+        top_idx      = np.argsort(abs_loadings)[::-1][:3]
+        top_features[f"PC{i+1}"] = [cols[idx] for idx in top_idx]
+
+    return PCAResult(
+        n_components         = len(explained),
+        explained_variance   = explained,
+        cumulative_variance  = cumulative,
+        components_for_90pct = components_90,
+        top_features         = top_features,
+    )
