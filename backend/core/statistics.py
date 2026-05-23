@@ -462,3 +462,165 @@ def run_pca(
         components_for_90pct = components_90,
         top_features         = top_features,
     )
+
+# ══════════════════════════════════════════════════════════════════
+# MODULE 6 — Categorical frequency analysis
+# ══════════════════════════════════════════════════════════════════
+
+def analyze_categorical_frequencies(
+    df: pd.DataFrame,
+    top_n: int = 10,
+) -> List[CategoryFrequency]:
+    """
+    Analyse value distributions in categorical columns.
+
+    Shannon entropy:
+    H = -Σ p_i × log2(p_i)
+    Max entropy = log2(n_unique) — perfectly uniform
+    Min entropy = 0 — one value dominates 100%
+
+    We normalise: H / log2(n_unique) → 0 to 1 scale.
+    Low normalised entropy (< 0.3) signals a dominant category
+    that may cause class imbalance problems in ML.
+    """
+    results  = []
+    cat_cols = df.select_dtypes(include=["category", "object"]).columns
+
+    for col in cat_cols:
+        series = df[col].dropna()
+        if len(series) == 0:
+            continue
+
+        vc     = series.value_counts()
+        total  = len(series)
+        n_uniq = len(vc)
+
+        top_values = [
+            {
+                "value": str(v),
+                "count": int(c),
+                "pct":   round(c / total * 100, 1),
+            }
+            for v, c in vc.head(top_n).items()
+        ]
+
+        # Shannon entropy
+        probs   = vc.values / total
+        entropy = float(-np.sum(probs * np.log2(probs + 1e-12)))
+        # Normalise by max possible entropy
+        max_h   = log2(n_uniq) if n_uniq > 1 else 1.0
+
+        results.append(CategoryFrequency(
+            column       = col,
+            top_values   = top_values,
+            unique_count = n_uniq,
+            top1_pct     = round(float(vc.iloc[0] / total * 100), 1),
+            entropy      = round(entropy / max_h, 4),   # normalised 0–1
+        ))
+
+    return results
+
+
+# ══════════════════════════════════════════════════════════════════
+# INSIGHT GENERATOR — rule-based plain English
+# ══════════════════════════════════════════════════════════════════
+
+def generate_insights(
+    descriptive:    List,
+    correlations:   List,
+    distributions:  List,
+    hypothesis:     List,
+    pca:            Optional[object],
+    cat_freqs:      List,
+    vif_results:    List,
+) -> Tuple[List[str], List[str]]:
+    """
+    Translate statistics into plain-English sentences.
+    Returns (insights, warnings).
+
+    This is pure rule-based logic — no LLM.
+    Each rule is a threshold comparison → sentence template.
+    """
+    insights = []
+    warnings = []
+
+    # ── Descriptive insights ────────────────────────────────────
+    for s in descriptive:
+        if abs(s.skewness) > 1.5:
+            direction = "right" if s.skewness > 0 else "left"
+            insights.append(
+                f"'{s.column}' is strongly {direction}-skewed "
+                f"(skewness={s.skewness:.2f}), suggesting a log transform "
+                f"may improve ML model performance."
+            )
+        if s.cv > 1.0:
+            insights.append(
+                f"'{s.column}' has very high relative spread "
+                f"(CV={s.cv:.2f}) — values vary widely relative to the mean."
+            )
+        if not s.is_normal:
+            pass  # distribution module handles this
+
+    # ── Correlation insights ─────────────────────────────────────
+    strong_pairs = [c for c in correlations if abs(c.pearson) >= 0.7]
+    if strong_pairs:
+        top = strong_pairs[0]
+        insights.append(
+            f"Strong {top.direction} correlation detected between "
+            f"'{top.col_a}' and '{top.col_b}' (r={top.pearson:.2f}). "
+            f"These features may be partially redundant."
+        )
+    if len(strong_pairs) > 3:
+        insights.append(
+            f"{len(strong_pairs)} strongly correlated feature pairs found. "
+            f"Consider dimensionality reduction before training ML models."
+        )
+
+    # ── VIF warnings ────────────────────────────────────────────
+    severe_vif = [v for v in vif_results if v.flag == "severe"]
+    for v in severe_vif:
+        warnings.append(
+            f"Severe multicollinearity: '{v.column}' has VIF={v.vif:.1f}. "
+            f"It is nearly a linear combination of other features — "
+            f"consider removing it before linear model training."
+        )
+
+    # ── Distribution insights ────────────────────────────────────
+    non_normal = [d for d in distributions if not d.is_normal]
+    if len(non_normal) > len(distributions) * 0.6:
+        insights.append(
+            f"{len(non_normal)} of {len(distributions)} numeric columns are "
+            f"non-normal. Tree-based models (Random Forest, XGBoost) are "
+            f"recommended over linear regression for this dataset."
+        )
+
+    # ── Hypothesis test insights ─────────────────────────────────
+    sig_tests = [h for h in hypothesis if h.significant]
+    for h in sig_tests[:3]:   # top 3 significant only
+        insights.append(h.interpretation)
+
+    # ── PCA insights ─────────────────────────────────────────────
+    if pca:
+        pct_in_2 = round(pca.cumulative_variance[1] * 100, 1) if len(pca.cumulative_variance) >= 2 else 0
+        insights.append(
+            f"PCA: {pca.components_for_90pct} components explain 90% of variance "
+            f"(out of {pca.n_components} total). "
+            f"First 2 components capture {pct_in_2}% of information."
+        )
+
+    # ── Categorical imbalance warnings ──────────────────────────
+    for cf in cat_freqs:
+        if cf.top1_pct > 90:
+            warnings.append(
+                f"'{cf.column}' is highly imbalanced: "
+                f"the top value covers {cf.top1_pct:.1f}% of rows. "
+                f"This will cause class imbalance in classification models."
+            )
+        if cf.entropy < 0.2:
+            warnings.append(
+                f"'{cf.column}' has very low entropy ({cf.entropy:.2f}) — "
+                f"nearly all rows share the same value. "
+                f"Consider dropping this column."
+            )
+
+    return insights, warnings
