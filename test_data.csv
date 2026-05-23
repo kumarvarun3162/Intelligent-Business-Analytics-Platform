@@ -1,6 +1,13 @@
-name,age,salary,city,join_date,status,revenue,cost
-Alice,28,75000,New York,2021-03-15,active,120000,80000
-Bob,34,92000,Chicago,2019-07-22,active,200000,130000
-Carol,25,61000,New York,2023-01-10,inactive,90000,70000
-Dave,45,115000,Seattle,2018-11-05,active,350000,200000
-Eve,31,78000,Boston,2022-05-18,active,145000,95000
+age,salary,department,city,experience,revenue,joined_date,churned
+28,75000,Engineering,New York,3,120000,2021-03-15,no
+34,92000,Marketing,Chicago,8,200000,2019-07-22,no
+25,61000,Engineering,New York,1,90000,2023-01-10,yes
+45,115000,Sales,Seattle,20,350000,2018-11-05,no
+31,78000,Marketing,Boston,6,145000,2022-05-18,no
+38,98000,Engineering,New York,12,280000,2020-09-01,no
+27,67000,HR,Chicago,2,85000,2022-11-30,yes
+52,130000,Sales,Seattle,25,420000,2015-06-14,no
+29,72000,Marketing,New York,4,110000,2021-08-20,no
+42,105000,Engineering,Boston,15,310000,2017-03-08,no
+33,88000,HR,Chicago,7,195000,2020-01-15,yes
+36,95000,Sales,New York,10,260000,2019-04-22,no

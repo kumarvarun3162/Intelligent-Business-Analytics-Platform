@@ -5,6 +5,7 @@ import PreviewTable from './components/Upload/PreviewTable'
 import MetadataCard from './components/Upload/MetadataCard'
 import CleaningPanel from './components/Cleaning/CleaningPanel'
 import EngineeringPanel from './components/Engineering/EngineeringPanel'
+import InsightsPanel from './components/Analysis/InsightsPanel'
 
 export default function App() {
   const [uploadResult, setUploadResult] = useState(null)
@@ -54,6 +55,9 @@ export default function App() {
             sessionId={uploadResult.metadata.session_id}
             onEngineered={(r) => console.log('Engineered:', r)}
           />
+        )}
+        {uploadResult && cleanResult && (
+          <InsightsPanel sessionId={uploadResult.metadata.session_id} />
         )}
       </main>
     </div>
