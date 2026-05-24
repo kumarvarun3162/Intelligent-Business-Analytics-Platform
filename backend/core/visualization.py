@@ -512,3 +512,179 @@ def make_correlation_heatmap(
         insight       = insight,
         priority      = priority,
     )
+
+# ══════════════════════════════════════════════════════════════════
+# PCA SCATTER — PC1 vs PC2 coloured by categorical column
+# ══════════════════════════════════════════════════════════════════
+
+def make_pca_scatter(
+    df: pd.DataFrame,
+    pca_result,                   # PCAResult from Phase 4
+    color_col: Optional[str] = None,
+    priority: int = 2,
+) -> Optional[ChartConfig]:
+    """
+    Project the dataset onto PC1 and PC2, then scatter-plot it.
+
+    This reveals natural clusters and outliers in the data that are
+    invisible when you look at individual columns.
+
+    We recompute the PCA projection here (not stored in Phase 4)
+    because storing the full n×k projection matrix in SQLite would
+    be too large. The recomputation is fast (<1s for typical datasets).
+    """
+    from sklearn.preprocessing import StandardScaler
+    from sklearn.decomposition import PCA
+
+    numeric_df = df.select_dtypes(include=[np.number]).dropna()
+    if len(numeric_df.columns) < 2 or len(numeric_df) < 5:
+        return None
+
+    scaler = StandardScaler()
+    X      = scaler.fit_transform(numeric_df)
+    pca    = PCA(n_components=min(2, X.shape[1]))
+    coords = pca.fit_transform(X)
+
+    pc1_var = round(pca.explained_variance_ratio_[0] * 100, 1)
+    pc2_var = round(pca.explained_variance_ratio_[1] * 100, 1) if X.shape[1] > 1 else 0
+
+    # Align index with original df for colour column lookup
+    idx    = numeric_df.index
+    pc1    = coords[:, 0].tolist()
+    pc2    = (coords[:, 1].tolist() if X.shape[1] > 1 else [0.0] * len(coords))
+
+    traces = []
+    if color_col and color_col in df.columns:
+        color_series = df.loc[idx, color_col].fillna("unknown")
+        for i, grp in enumerate(color_series.unique()):
+            mask = color_series == grp
+            traces.append({
+                "type":   "scatter",
+                "mode":   "markers",
+                "x":      [pc1[j] for j, m in enumerate(mask) if m],
+                "y":      [pc2[j] for j, m in enumerate(mask) if m],
+                "name":   str(grp),
+                "marker": {"color": COLORS[i % len(COLORS)],
+                           "size": 6, "opacity": 0.75},
+                "hovertemplate": f"{grp}<br>PC1: %{{x:.2f}}<br>PC2: %{{y:.2f}}<extra></extra>",
+            })
+        show_legend = True
+        insight     = f"PCA projection coloured by '{color_col}' — distinct clusters indicate separable groups"
+    else:
+        traces.append({
+            "type":   "scatter",
+            "mode":   "markers",
+            "x":      pc1,
+            "y":      pc2,
+            "marker": {"color": COLORS[0], "size": 5, "opacity": 0.65,
+                       "colorscale": "Teal"},
+            "hovertemplate": "PC1: %{x:.2f}<br>PC2: %{y:.2f}<extra></extra>",
+        })
+        show_legend = False
+        insight     = f"PC1 ({pc1_var}%) + PC2 ({pc2_var}%) = {pc1_var + pc2_var:.1f}% of total variance"
+
+    layout = _base_layout(
+        "PCA — PC1 vs PC2",
+        {"showlegend": show_legend,
+         "xaxis": {"title": f"PC1 ({pc1_var}% variance)"},
+         "yaxis": {"title": f"PC2 ({pc2_var}% variance)"},
+         "shapes": [
+             {"type": "line", "x0": 0, "x1": 0,
+              "y0": min(pc2) - 0.5, "y1": max(pc2) + 0.5,
+              "line": {"color": "rgba(255,255,255,0.1)", "width": 1}},
+             {"type": "line", "y0": 0, "y1": 0,
+              "x0": min(pc1) - 0.5, "x1": max(pc1) + 0.5,
+              "line": {"color": "rgba(255,255,255,0.1)", "width": 1}},
+         ]},
+    )
+
+    return ChartConfig(
+        chart_id      = "pca_scatter",
+        title         = "PCA projection",
+        chart_type    = "pca_scatter",
+        columns       = numeric_df.columns.tolist(),
+        plotly_data   = traces,
+        plotly_layout = layout,
+        insight       = insight,
+        priority      = priority,
+    )
+
+
+# ══════════════════════════════════════════════════════════════════
+# QUALITY GAUGE — data quality score visualisation
+# ══════════════════════════════════════════════════════════════════
+
+def make_quality_gauge(
+    quality_score: float,
+    quality_grade: str,
+    stats: Dict[str, Any],
+    priority: int = 1,
+) -> ChartConfig:
+    """
+    Gauge chart showing the overall data quality score.
+
+    Plotly's indicator trace type renders gauges natively.
+    The colour transitions: red (<45) → orange → yellow → teal (>90).
+
+    stats dict should include: rows_removed, nulls_filled,
+    duplicates_removed, outliers_detected.
+    """
+    color = (
+        "#5DCAA5" if quality_score >= 75 else
+        "#EF9F27" if quality_score >= 50 else
+        "#D85A30"
+    )
+
+    trace = {
+        "type": "indicator",
+        "mode": "gauge+number+delta",
+        "value": quality_score,
+        "number": {"suffix": "/100", "font": {"size": 36, "color": color}},
+        "gauge": {
+            "axis":       {"range": [0, 100], "tickwidth": 1,
+                          "tickcolor": "#4b5563",
+                          "tickfont": {"color": "#6b7280", "size": 10}},
+            "bar":        {"color": color},
+            "bgcolor":    "rgba(0,0,0,0)",
+            "borderwidth": 0,
+            "steps": [
+                {"range": [0,  45], "color": "rgba(216,90,48,0.15)"},
+                {"range": [45, 60], "color": "rgba(239,159,39,0.12)"},
+                {"range": [60, 75], "color": "rgba(239,159,39,0.10)"},
+                {"range": [75, 90], "color": "rgba(93,202,165,0.10)"},
+                {"range": [90,100], "color": "rgba(93,202,165,0.18)"},
+            ],
+            "threshold": {
+                "line":  {"color": "white", "width": 2},
+                "thickness": 0.75,
+                "value": quality_score,
+            },
+        },
+        "title": {
+            "text": f"Data quality — Grade {quality_grade}",
+            "font": {"size": 13, "color": "#9ca3af"},
+        },
+    }
+
+    layout = {
+        **BASE_LAYOUT,
+        "height": 220,
+        "margin": {"l": 30, "r": 30, "t": 40, "b": 10},
+    }
+
+    rows_removed = stats.get("rows_removed", 0)
+    nulls_filled = stats.get("nulls_filled", 0)
+
+    return ChartConfig(
+        chart_id      = "quality_gauge",
+        title         = f"Data quality — Grade {quality_grade}",
+        chart_type    = "gauge",
+        columns       = [],
+        plotly_data   = [trace],
+        plotly_layout = layout,
+        insight       = (
+            f"{rows_removed} rows removed, "
+            f"{nulls_filled} nulls filled during cleaning."
+        ),
+        priority      = priority,
+    )
