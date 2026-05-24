@@ -244,3 +244,36 @@ class AnalysisResponse(BaseModel):
     success: bool
     message: str
     report:  Optional[InsightsReport] = None
+
+class ChartConfig(BaseModel):
+    """
+    A single Plotly chart config — ready to pass directly to
+    the React Plotly component as `data` and `layout` props.
+    """
+    chart_id:    str              # unique id e.g. "hist_salary"
+    title:       str              # display title
+    chart_type:  str              # "histogram","box","bar","scatter",
+                                  # "line","heatmap","pca_scatter","gauge"
+    columns:     List[str]        # source columns this chart visualises
+    plotly_data: List[Dict[str, Any]]   # Plotly trace array
+    plotly_layout: Dict[str, Any]       # Plotly layout object
+    insight:     Optional[str] = None   # one-line auto-insight for this chart
+    priority:    int = 5          # 1=most important, 10=least — controls order
+
+
+class DashboardConfig(BaseModel):
+    """Full dashboard payload sent to the frontend."""
+    session_id:    str
+    dataset_name:  str
+    row_count:     int
+    col_count:     int
+    charts:        List[ChartConfig]
+    quality_score: Optional[float] = None
+    quality_grade: Optional[str]  = None
+    generated_at:  str            # ISO timestamp
+
+
+class DashboardResponse(BaseModel):
+    success:   bool
+    message:   str
+    dashboard: Optional[DashboardConfig] = None
