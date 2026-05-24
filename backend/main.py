@@ -6,10 +6,12 @@ from contextlib import asynccontextmanager
 
 from storage.database import init_db
 from api.routes.upload import router as upload_router
-from api.routes.clean import router as clean_router
 
+from api.routes.clean import router as clean_router
 from api.routes.engineer import router as engineer_router
 from api.routes.analyze import router as analyze_router
+from api.routes.charts import router as charts_router
+
 
 # ── Lifespan: runs once at startup and shutdown ──────────────────
 @asynccontextmanager
@@ -51,6 +53,7 @@ app.include_router(upload_router)
 app.include_router(clean_router)
 app.include_router(engineer_router)
 app.include_router(analyze_router)
+app.include_router(charts_router)
 
 
 # ── Health check ─────────────────────────────────────────────────
