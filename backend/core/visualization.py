@@ -688,3 +688,129 @@ def make_quality_gauge(
         ),
         priority      = priority,
     )
+
+
+# ══════════════════════════════════════════════════════════════════
+# MASTER DASHBOARD BUILDER
+# ══════════════════════════════════════════════════════════════════
+
+def build_dashboard(
+    df:            pd.DataFrame,
+    session_id:    str,
+    dataset_name:  str,
+    insights_report,              # InsightsReport from Phase 4
+    cleaning_report = None,       # CleaningReport from Phase 2 (optional)
+    type_map: Dict[str, str] = None,
+) -> DashboardConfig:
+    """
+    Orchestrate all chart generators and build the full dashboard.
+
+    Chart selection strategy:
+    1. Quality gauge — always first (shows overall health)
+    2. Correlation heatmap — if 2+ numeric cols
+    3. Line charts — for any datetime columns (time trends = highest value)
+    4. Histograms — for each numeric column (distribution shape)
+    5. Box plot — all numerics together (spread overview)
+    6. Bar charts — for each categorical column (frequency)
+    7. Scatter plots — top correlated pairs from Phase 4
+    8. PCA scatter — if PCA was computed in Phase 4
+    """
+    charts = []
+    tmap   = type_map or {}
+
+    # Infer type_map from DataFrame if not provided
+    if not tmap:
+        for col in df.columns:
+            dtype = str(df[col].dtype)
+            if "datetime" in dtype:
+                tmap[col] = "datetime"
+            elif "float" in dtype or "int" in dtype:
+                tmap[col] = "float"
+            elif "category" in dtype:
+                tmap[col] = "categorical"
+            else:
+                tmap[col] = "string"
+
+    numeric_cols  = [c for c, t in tmap.items() if t in ("float", "integer") and c in df.columns]
+    datetime_cols = [c for c, t in tmap.items() if t == "datetime" and c in df.columns]
+    cat_cols      = [c for c, t in tmap.items() if t in ("categorical", "string") and c in df.columns]
+
+    # ── 1. Quality gauge ─────────────────────────────────────────
+    if cleaning_report:
+        gauge_stats = {
+            "rows_removed": cleaning_report.rows_removed,
+            "nulls_filled": cleaning_report.total_nulls_before - cleaning_report.total_nulls_after,
+        }
+        charts.append(make_quality_gauge(
+            cleaning_report.quality_score,
+            cleaning_report.quality_grade,
+            gauge_stats,
+            priority=1,
+        ))
+
+    # ── 2. Correlation heatmap ───────────────────────────────────
+    if len(numeric_cols) >= 2:
+        hm = make_correlation_heatmap(
+            df, insights_report.correlations if insights_report else [], priority=1
+        )
+        if hm:
+            charts.append(hm)
+
+    # ── 3. Line charts for datetime columns ──────────────────────
+    for dt_col in datetime_cols[:2]:
+        if numeric_cols:
+            charts.append(make_line_chart(df, dt_col, numeric_cols[:4], priority=2))
+
+    # ── 4. PCA scatter ───────────────────────────────────────────
+    if insights_report and insights_report.pca and len(numeric_cols) >= 3:
+        # Use first categorical col as colour if available
+        color_col = cat_cols[0] if cat_cols else None
+        pca_chart = make_pca_scatter(df, insights_report.pca, color_col, priority=2)
+        if pca_chart:
+            charts.append(pca_chart)
+
+    # ── 5. Histograms for each numeric column ────────────────────
+    for i, col in enumerate(numeric_cols[:10]):
+        charts.append(make_histogram(df, col, priority=4))
+
+    # ── 6. Box plot overview ─────────────────────────────────────
+    if len(numeric_cols) >= 2:
+        # Also make grouped box plots for top categorical column
+        if cat_cols:
+            for num_col in numeric_cols[:3]:
+                charts.append(make_box_plot(
+                    df, [num_col], group_col=cat_cols[0], priority=3
+                ))
+        else:
+            charts.append(make_box_plot(df, numeric_cols[:8], priority=3))
+
+    # ── 7. Bar charts for categorical columns ────────────────────
+    for col in cat_cols[:6]:
+        charts.append(make_bar_chart(df, col, priority=5))
+
+    # ── 8. Scatter for top correlated pairs ──────────────────────
+    if insights_report:
+        top_pairs = [
+            c for c in insights_report.correlations
+            if abs(c.pearson) >= 0.4
+        ][:4]
+        color_col = cat_cols[0] if cat_cols else None
+        for pair in top_pairs:
+            if pair.col_a in df.columns and pair.col_b in df.columns:
+                charts.append(make_scatter(
+                    df, pair.col_a, pair.col_b, color_col, priority=3
+                ))
+
+    # Sort by priority (lower = shown first)
+    charts.sort(key=lambda c: c.priority)
+
+    return DashboardConfig(
+        session_id   = session_id,
+        dataset_name = dataset_name,
+        row_count    = len(df),
+        col_count    = len(df.columns),
+        charts       = charts,
+        quality_score = cleaning_report.quality_score if cleaning_report else None,
+        quality_grade = cleaning_report.quality_grade if cleaning_report else None,
+        generated_at  = datetime.utcnow().isoformat(),
+    )
