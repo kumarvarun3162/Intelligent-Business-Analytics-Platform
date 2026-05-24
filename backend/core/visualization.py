@@ -276,3 +276,239 @@ def make_bar_chart(
         insight       = f"'{top_val}' is most frequent ({top_pct}% of rows). {n_unique} unique values total.",
         priority      = priority,
     )
+
+# ══════════════════════════════════════════════════════════════════
+# SCATTER PLOT — relationship between two numeric columns
+# ══════════════════════════════════════════════════════════════════
+
+def make_scatter(
+    df: pd.DataFrame,
+    col_x: str,
+    col_y: str,
+    color_col: Optional[str] = None,
+    priority: int = 4,
+) -> ChartConfig:
+    """
+    Scatter plot for two numeric columns.
+    Optionally colour-codes points by a categorical column.
+
+    For large datasets (>5000 rows) we sample to keep the JSON
+    payload manageable without losing the distributional shape.
+    """
+    MAX_POINTS = 2000
+    subset = df[[col_x, col_y] + ([color_col] if color_col else [])].dropna()
+
+    if len(subset) > MAX_POINTS:
+        subset = subset.sample(MAX_POINTS, random_state=42)
+
+    traces = []
+    if color_col and color_col in subset.columns:
+        for i, grp in enumerate(subset[color_col].unique()):
+            mask = subset[color_col] == grp
+            traces.append({
+                "type":   "scatter",
+                "mode":   "markers",
+                "x":      _safe_values(subset.loc[mask, col_x]),
+                "y":      _safe_values(subset.loc[mask, col_y]),
+                "name":   str(grp),
+                "marker": {"color": COLORS[i % len(COLORS)],
+                           "size": 5, "opacity": 0.7},
+                "hovertemplate": f"{col_x}: %{{x}}<br>{col_y}: %{{y}}<extra>{grp}</extra>",
+            })
+        show_legend = True
+    else:
+        # Compute Pearson r for the insight line
+        corr = subset[[col_x, col_y]].corr().iloc[0, 1]
+        traces.append({
+            "type":   "scatter",
+            "mode":   "markers",
+            "x":      _safe_values(subset[col_x]),
+            "y":      _safe_values(subset[col_y]),
+            "name":   f"{col_x} vs {col_y}",
+            "marker": {"color": COLORS[0], "size": 5, "opacity": 0.6},
+            "hovertemplate": f"{col_x}: %{{x}}<br>{col_y}: %{{y}}<extra></extra>",
+        })
+        show_legend = False
+
+    corr_val = subset[[col_x, col_y]].corr().iloc[0, 1]
+    strength = (
+        "strong" if abs(corr_val) >= 0.7 else
+        "moderate" if abs(corr_val) >= 0.4 else
+        "weak"
+    )
+    direction = "positive" if corr_val > 0 else "negative"
+
+    layout = _base_layout(
+        f"{col_x} vs {col_y}",
+        {"showlegend": show_legend,
+         "xaxis": {"title": col_x},
+         "yaxis": {"title": col_y}},
+    )
+
+    return ChartConfig(
+        chart_id      = f"scatter_{col_x}_{col_y}",
+        title         = f"{col_x} vs {col_y}",
+        chart_type    = "scatter",
+        columns       = [col_x, col_y] + ([color_col] if color_col else []),
+        plotly_data   = traces,
+        plotly_layout = layout,
+        insight       = f"{strength.capitalize()} {direction} correlation (r={corr_val:.3f})",
+        priority      = priority,
+    )
+
+
+# ══════════════════════════════════════════════════════════════════
+# LINE CHART — time series
+# ══════════════════════════════════════════════════════════════════
+
+def make_line_chart(
+    df: pd.DataFrame,
+    time_col: str,
+    value_cols: List[str],
+    priority: int = 2,
+) -> ChartConfig:
+    """
+    Line chart for time-series data.
+
+    We sort by the time column before plotting — unsorted time data
+    produces jagged zig-zag lines that look like noise.
+
+    Multiple value columns become multiple traces with shared x-axis.
+    """
+    sorted_df = df[[time_col] + value_cols].dropna(subset=[time_col])
+    sorted_df = sorted_df.sort_values(time_col)
+
+    # Sample if too large (keep every Nth row)
+    MAX_POINTS = 1000
+    if len(sorted_df) > MAX_POINTS:
+        step = len(sorted_df) // MAX_POINTS
+        sorted_df = sorted_df.iloc[::step]
+
+    traces = []
+    for i, col in enumerate(value_cols[:5]):
+        traces.append({
+            "type":   "scatter",
+            "mode":   "lines",
+            "x":      [str(v) for v in sorted_df[time_col]],
+            "y":      _safe_values(sorted_df[col]),
+            "name":   col,
+            "line":   {"color": COLORS[i % len(COLORS)], "width": 2},
+            "hovertemplate": f"%{{x}}<br>{col}: %{{y}}<extra></extra>",
+        })
+
+    title_str = f"Time series — {', '.join(value_cols[:3])}"
+    layout = _base_layout(
+        title_str,
+        {"showlegend": len(traces) > 1,
+         "xaxis": {"title": time_col, "type": "date"},
+         "yaxis": {"title": "value"}},
+    )
+
+    return ChartConfig(
+        chart_id      = f"line_{time_col}",
+        title         = title_str,
+        chart_type    = "line",
+        columns       = [time_col] + value_cols,
+        plotly_data   = traces,
+        plotly_layout = layout,
+        insight       = f"Trends over time for {len(value_cols)} numeric variable(s)",
+        priority      = priority,
+    )
+
+
+# ══════════════════════════════════════════════════════════════════
+# CORRELATION HEATMAP
+# ══════════════════════════════════════════════════════════════════
+
+def make_correlation_heatmap(
+    df: pd.DataFrame,
+    correlations: List,          # List[CorrelationPair] from Phase 4
+    priority: int = 1,
+) -> Optional[ChartConfig]:
+    """
+    Full correlation matrix as an annotated heatmap.
+
+    This is the most information-dense chart in the dashboard —
+    it shows ALL pairwise correlations in one view.
+
+    We use Pearson r values. The matrix is symmetric (r(A,B) = r(B,A))
+    so we only need to compute it once and mirror it.
+
+    Annotations: each cell shows the r value, coloured for readability.
+    Strong correlations (|r| > 0.7) get bold text in the annotation.
+    """
+    numeric_df = df.select_dtypes(include=[np.number])
+    if len(numeric_df.columns) < 2:
+        return None
+
+    # Cap at 15 columns — beyond that the heatmap becomes unreadable
+    cols = numeric_df.columns[:15].tolist()
+    corr_matrix = numeric_df[cols].corr(method="pearson")
+
+    # Round for display
+    z_values = corr_matrix.round(2).values.tolist()
+
+    # Annotation text for each cell
+    annotations = []
+    for i, row_col in enumerate(cols):
+        for j, col_col in enumerate(cols):
+            val = corr_matrix.iloc[i, j]
+            annotations.append({
+                "x":        col_col,
+                "y":        row_col,
+                "text":     f"{val:.2f}",
+                "font":     {"size": 9,
+                             "color": "white" if abs(val) > 0.5 else "#9ca3af"},
+                "showarrow": False,
+            })
+
+    trace = {
+        "type":        "heatmap",
+        "z":           z_values,
+        "x":           cols,
+        "y":           cols,
+        "colorscale":  HEATMAP_COLORSCALE,
+        "zmid":        0,
+        "zmin":        -1,
+        "zmax":        1,
+        "colorbar": {
+            "title":     "r",
+            "thickness": 12,
+            "len":       0.8,
+            "tickvals":  [-1, -0.5, 0, 0.5, 1],
+            "tickfont":  {"size": 10, "color": "#9ca3af"},
+        },
+        "hovertemplate": "%{y} × %{x}<br>r = %{z:.3f}<extra></extra>",
+    }
+
+    # Find the strongest off-diagonal correlation
+    max_pair = ("", "", 0.0)
+    for cp in correlations:
+        if abs(cp.pearson) > abs(max_pair[2]):
+            max_pair = (cp.col_a, cp.col_b, cp.pearson)
+
+    layout = _base_layout(
+        "Correlation heatmap",
+        {"annotations": annotations,
+         "height": max(350, len(cols) * 35),
+         "xaxis": {"side": "bottom", "tickangle": -35, "automargin": True},
+         "yaxis": {"automargin": True}},
+    )
+
+    insight = (
+        f"Strongest correlation: '{max_pair[0]}' ↔ '{max_pair[1]}' "
+        f"(r={max_pair[2]:.2f})"
+        if max_pair[0] else
+        "No strong correlations detected in this dataset."
+    )
+
+    return ChartConfig(
+        chart_id      = "heatmap_correlation",
+        title         = "Correlation heatmap",
+        chart_type    = "heatmap",
+        columns       = cols,
+        plotly_data   = [trace],
+        plotly_layout = layout,
+        insight       = insight,
+        priority      = priority,
+    )
