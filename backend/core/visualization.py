@@ -8,17 +8,16 @@ from models.schemas import ChartConfig, DashboardConfig
 
 
 # ── Plotly theme constants ────────────────────────────────────────
-# Dark-mode first palette — these render well on both dark and light
 COLORS = [
     "#5DCAA5", "#7F77DD", "#D85A30", "#378ADD",
     "#EF9F27", "#D4537E", "#639922", "#E24B4A",
 ]
 HEATMAP_COLORSCALE = [
-    [0.0,  "#3C3489"],   # dark purple — strong negative
-    [0.25, "#AFA9EC"],   # light purple
-    [0.5,  "#F1EFE8"],   # near-white neutral
-    [0.75, "#9FE1CB"],   # light teal
-    [1.0,  "#085041"],   # dark teal — strong positive
+    [0.0,  "#3C3489"],
+    [0.25, "#AFA9EC"],
+    [0.5,  "#F1EFE8"],
+    [0.75, "#9FE1CB"],
+    [1.0,  "#085041"],
 ]
 
 BASE_LAYOUT = {
@@ -40,6 +39,46 @@ BASE_LAYOUT = {
 }
 
 
+def _to_python(v) -> Any:
+    """
+    Recursively convert a single value to a JSON-safe native Python type.
+    Handles numpy scalars, pandas NA, inf, and nested structures.
+    """
+    if isinstance(v, (np.integer,)):
+        return int(v)
+    if isinstance(v, (np.floating,)):
+        if np.isnan(v) or np.isinf(v):
+            return None
+        return float(v)
+    if isinstance(v, np.bool_):
+        return bool(v)
+    if isinstance(v, np.ndarray):
+        return [_to_python(x) for x in v]
+    if isinstance(v, (list, tuple)):
+        return [_to_python(x) for x in v]
+    if isinstance(v, dict):
+        return {k: _to_python(val) for k, val in v.items()}
+    try:
+        if pd.isna(v):
+            return None
+    except (TypeError, ValueError):
+        pass
+    return v
+
+
+def _safe_values(series: pd.Series) -> list:
+    """Convert a pandas Series to a JSON-safe Python list."""
+    return [_to_python(v) for v in series]
+
+
+def _sanitize_trace(trace: dict) -> dict:
+    """
+    Walk every value in a Plotly trace dict and convert all
+    numpy types to native Python. Called before returning ChartConfig.
+    """
+    return {k: _to_python(v) for k, v in trace.items()}
+
+
 def _base_layout(title: str, extra: Dict = None) -> Dict:
     """Merge BASE_LAYOUT with a title and any chart-specific overrides."""
     layout = {**BASE_LAYOUT, "title": {"text": title, "font": {"size": 14, "color": "#e5e7eb"}}}
@@ -49,22 +88,8 @@ def _base_layout(title: str, extra: Dict = None) -> Dict:
                 layout[k] = {**layout[k], **v}
             else:
                 layout[k] = v
-    return layout
-
-
-def _safe_values(series: pd.Series) -> list:
-    """Convert a pandas Series to a JSON-safe Python list."""
-    result = []
-    for v in series:
-        if isinstance(v, (np.integer,)):
-            result.append(int(v))
-        elif isinstance(v, (np.floating,)):
-            result.append(None if np.isnan(v) else float(v))
-        elif pd.isna(v):
-            result.append(None)
-        else:
-            result.append(v)
-    return result
+    # FIX: Sanitize the whole layout so no numpy types slip through
+    return _to_python(layout)
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -81,14 +106,10 @@ def make_histogram(
 
     Uses Plotly's autobinning — it picks the optimal bin count
     using the Sturges/Scott formula based on data size.
-
-    The overlay of a KDE (kernel density estimate) curve would
-    require scipy — we skip it here to keep the response payload
-    small and add it as an enhancement later.
     """
-    series  = df[col].dropna()
-    skew    = float(series.skew())
-    mean_v  = float(series.mean())
+    series   = df[col].dropna()
+    skew     = float(series.skew())
+    mean_v   = float(series.mean())
     median_v = float(series.median())
 
     trace = {
@@ -100,7 +121,6 @@ def make_histogram(
         "hovertemplate": f"{col}: %{{x}}<br>Count: %{{y}}<extra></extra>",
     }
 
-    # Vertical lines for mean and median
     shapes = [
         {"type": "line", "x0": mean_v,   "x1": mean_v,
          "y0": 0, "y1": 1, "yref": "paper",
@@ -132,15 +152,18 @@ def make_histogram(
         f"Approximately symmetric (skew={skew:.2f})"
     )
 
+    # FIX: sanitize trace before passing to ChartConfig
+    trace = _sanitize_trace(trace)
+
     return ChartConfig(
-        chart_id     = f"hist_{col}",
-        title        = f"Distribution — {col}",
-        chart_type   = "histogram",
-        columns      = [col],
-        plotly_data  = [trace],
+        chart_id      = f"hist_{col}",
+        title         = f"Distribution — {col}",
+        chart_type    = "histogram",
+        columns       = [col],
+        plotly_data   = [trace],
         plotly_layout = layout,
-        insight      = skew_label,
-        priority     = priority,
+        insight       = skew_label,
+        priority      = priority,
     )
 
 
@@ -158,7 +181,7 @@ def make_box_plot(
     Box plot for multiple numeric columns side by side,
     optionally grouped by a categorical column.
 
-    Box plot anatomy (in case the user asks):
+    Box plot anatomy:
     - Centre line = median
     - Box edges   = Q1 (25th) and Q3 (75th) percentile
     - Whiskers    = 1.5 × IQR beyond Q1/Q3
@@ -167,34 +190,34 @@ def make_box_plot(
     traces = []
 
     if group_col and group_col in df.columns:
-        # One trace per category group, for the first numeric col
-        col  = numeric_cols[0]
+        col    = numeric_cols[0]
         groups = df[group_col].dropna().unique()
         for i, grp in enumerate(groups):
             subset = df.loc[df[group_col] == grp, col].dropna()
-            traces.append({
+            # FIX: sanitize each trace inside the loop
+            traces.append(_sanitize_trace({
                 "type":    "box",
                 "y":       _safe_values(subset),
                 "name":    str(grp),
                 "marker":  {"color": COLORS[i % len(COLORS)]},
                 "boxmean": True,
                 "hovertemplate": f"{grp}<br>%{{y}}<extra></extra>",
-            })
+            }))
         title_str = f"{col} by {group_col}"
         insight   = f"Comparing '{col}' distribution across '{group_col}' groups"
         cols_used = [col, group_col]
     else:
-        # Side-by-side boxes for all numeric columns
-        for i, col in enumerate(numeric_cols[:8]):  # cap at 8
+        for i, col in enumerate(numeric_cols[:8]):
             series = df[col].dropna()
-            traces.append({
+            # FIX: sanitize each trace inside the loop
+            traces.append(_sanitize_trace({
                 "type":    "box",
                 "y":       _safe_values(series),
                 "name":    col,
                 "marker":  {"color": COLORS[i % len(COLORS)]},
                 "boxmean": True,
                 "hovertemplate": f"{col}<br>%{{y}}<extra></extra>",
-            })
+            }))
         title_str = "Spread overview — all numeric columns"
         insight   = "Compare spread and outliers across all numeric features at a glance"
         cols_used = numeric_cols[:8]
@@ -234,17 +257,14 @@ def make_bar_chart(
     1. Category labels are readable without rotation
     2. Long category names don't overlap
     3. Human eyes scan frequency bars left-to-right naturally
-
-    Sorted descending so the most frequent category is always on top.
     """
     vc     = df[col].value_counts().head(top_n)
     labels = [str(v) for v in vc.index]
     values = list(vc.values)
 
-    # Color gradient: most frequent = most saturated
-    max_v  = max(values) if values else 1
+    max_v     = max(values) if values else 1
     opacities = [0.4 + 0.6 * (v / max_v) for v in values]
-    colors = [f"rgba(93,202,165,{round(op, 2)})" for op in opacities]
+    colors    = [f"rgba(93,202,165,{round(op, 2)})" for op in opacities]
 
     trace = {
         "type":        "bar",
@@ -255,9 +275,9 @@ def make_bar_chart(
         "hovertemplate": "%{y}: %{x} rows<extra></extra>",
     }
 
-    top_val   = labels[0] if labels else "?"
-    top_pct   = round(values[0] / len(df) * 100, 1) if values else 0
-    n_unique  = df[col].nunique()
+    top_val  = labels[0] if labels else "?"
+    top_pct  = round(values[0] / len(df) * 100, 1) if values else 0
+    n_unique = df[col].nunique()
 
     layout = _base_layout(
         f"Top values — {col}",
@@ -265,6 +285,9 @@ def make_bar_chart(
          "yaxis": {"automargin": True},
          "margin": {"l": 140, "r": 20, "t": 50, "b": 40}},
     )
+
+    # FIX: sanitize trace before passing to ChartConfig
+    trace = _sanitize_trace(trace)
 
     return ChartConfig(
         chart_id      = f"bar_{col}",
@@ -276,6 +299,7 @@ def make_bar_chart(
         insight       = f"'{top_val}' is most frequent ({top_pct}% of rows). {n_unique} unique values total.",
         priority      = priority,
     )
+
 
 # ══════════════════════════════════════════════════════════════════
 # SCATTER PLOT — relationship between two numeric columns
@@ -292,7 +316,7 @@ def make_scatter(
     Scatter plot for two numeric columns.
     Optionally colour-codes points by a categorical column.
 
-    For large datasets (>5000 rows) we sample to keep the JSON
+    For large datasets (>2000 rows) we sample to keep the JSON
     payload manageable without losing the distributional shape.
     """
     MAX_POINTS = 2000
@@ -317,8 +341,6 @@ def make_scatter(
             })
         show_legend = True
     else:
-        # Compute Pearson r for the insight line
-        corr = subset[[col_x, col_y]].corr().iloc[0, 1]
         traces.append({
             "type":   "scatter",
             "mode":   "markers",
@@ -344,6 +366,9 @@ def make_scatter(
          "xaxis": {"title": col_x},
          "yaxis": {"title": col_y}},
     )
+
+    # FIX: sanitize all traces before passing to ChartConfig
+    traces = [_sanitize_trace(t) for t in traces]
 
     return ChartConfig(
         chart_id      = f"scatter_{col_x}_{col_y}",
@@ -378,10 +403,9 @@ def make_line_chart(
     sorted_df = df[[time_col] + value_cols].dropna(subset=[time_col])
     sorted_df = sorted_df.sort_values(time_col)
 
-    # Sample if too large (keep every Nth row)
     MAX_POINTS = 1000
     if len(sorted_df) > MAX_POINTS:
-        step = len(sorted_df) // MAX_POINTS
+        step      = len(sorted_df) // MAX_POINTS
         sorted_df = sorted_df.iloc[::step]
 
     traces = []
@@ -404,6 +428,9 @@ def make_line_chart(
          "yaxis": {"title": "value"}},
     )
 
+    # FIX: sanitize all traces before passing to ChartConfig
+    traces = [_sanitize_trace(t) for t in traces]
+
     return ChartConfig(
         chart_id      = f"line_{time_col}",
         title         = title_str,
@@ -422,7 +449,7 @@ def make_line_chart(
 
 def make_correlation_heatmap(
     df: pd.DataFrame,
-    correlations: List,          # List[CorrelationPair] from Phase 4
+    correlations: List,
     priority: int = 1,
 ) -> Optional[ChartConfig]:
     """
@@ -430,35 +457,30 @@ def make_correlation_heatmap(
 
     This is the most information-dense chart in the dashboard —
     it shows ALL pairwise correlations in one view.
-
-    We use Pearson r values. The matrix is symmetric (r(A,B) = r(B,A))
-    so we only need to compute it once and mirror it.
-
-    Annotations: each cell shows the r value, coloured for readability.
-    Strong correlations (|r| > 0.7) get bold text in the annotation.
     """
     numeric_df = df.select_dtypes(include=[np.number])
     if len(numeric_df.columns) < 2:
         return None
 
-    # Cap at 15 columns — beyond that the heatmap becomes unreadable
-    cols = numeric_df.columns[:15].tolist()
+    cols        = numeric_df.columns[:15].tolist()
     corr_matrix = numeric_df[cols].corr(method="pearson")
 
-    # Round for display
-    z_values = corr_matrix.round(2).values.tolist()
+    # FIX: use _to_python for each cell instead of plain .tolist()
+    z_values = [
+        [_to_python(cell) for cell in row]
+        for row in corr_matrix.round(2).values
+    ]
 
-    # Annotation text for each cell
     annotations = []
     for i, row_col in enumerate(cols):
         for j, col_col in enumerate(cols):
             val = corr_matrix.iloc[i, j]
             annotations.append({
-                "x":        col_col,
-                "y":        row_col,
-                "text":     f"{val:.2f}",
-                "font":     {"size": 9,
-                             "color": "white" if abs(val) > 0.5 else "#9ca3af"},
+                "x":         col_col,
+                "y":         row_col,
+                "text":      f"{val:.2f}",
+                "font":      {"size": 9,
+                              "color": "white" if abs(val) > 0.5 else "#9ca3af"},
                 "showarrow": False,
             })
 
@@ -481,7 +503,6 @@ def make_correlation_heatmap(
         "hovertemplate": "%{y} × %{x}<br>r = %{z:.3f}<extra></extra>",
     }
 
-    # Find the strongest off-diagonal correlation
     max_pair = ("", "", 0.0)
     for cp in correlations:
         if abs(cp.pearson) > abs(max_pair[2]):
@@ -502,6 +523,9 @@ def make_correlation_heatmap(
         "No strong correlations detected in this dataset."
     )
 
+    # FIX: sanitize trace before passing to ChartConfig
+    trace = _sanitize_trace(trace)
+
     return ChartConfig(
         chart_id      = "heatmap_correlation",
         title         = "Correlation heatmap",
@@ -513,13 +537,14 @@ def make_correlation_heatmap(
         priority      = priority,
     )
 
+
 # ══════════════════════════════════════════════════════════════════
 # PCA SCATTER — PC1 vs PC2 coloured by categorical column
 # ══════════════════════════════════════════════════════════════════
 
 def make_pca_scatter(
     df: pd.DataFrame,
-    pca_result,                   # PCAResult from Phase 4
+    pca_result,
     color_col: Optional[str] = None,
     priority: int = 2,
 ) -> Optional[ChartConfig]:
@@ -528,10 +553,6 @@ def make_pca_scatter(
 
     This reveals natural clusters and outliers in the data that are
     invisible when you look at individual columns.
-
-    We recompute the PCA projection here (not stored in Phase 4)
-    because storing the full n×k projection matrix in SQLite would
-    be too large. The recomputation is fast (<1s for typical datasets).
     """
     from sklearn.preprocessing import StandardScaler
     from sklearn.decomposition import PCA
@@ -548,10 +569,11 @@ def make_pca_scatter(
     pc1_var = round(pca.explained_variance_ratio_[0] * 100, 1)
     pc2_var = round(pca.explained_variance_ratio_[1] * 100, 1) if X.shape[1] > 1 else 0
 
-    # Align index with original df for colour column lookup
-    idx    = numeric_df.index
-    pc1    = coords[:, 0].tolist()
-    pc2    = (coords[:, 1].tolist() if X.shape[1] > 1 else [0.0] * len(coords))
+    idx = numeric_df.index
+    # FIX: use _to_python instead of plain .tolist() for PCA coords
+    pc1 = [_to_python(v) for v in coords[:, 0]]
+    pc2 = ([_to_python(v) for v in coords[:, 1]]
+           if X.shape[1] > 1 else [0.0] * len(coords))
 
     traces = []
     if color_col and color_col in df.columns:
@@ -598,6 +620,9 @@ def make_pca_scatter(
          ]},
     )
 
+    # FIX: sanitize all traces before passing to ChartConfig
+    traces = [_sanitize_trace(t) for t in traces]
+
     return ChartConfig(
         chart_id      = "pca_scatter",
         title         = "PCA projection",
@@ -623,11 +648,7 @@ def make_quality_gauge(
     """
     Gauge chart showing the overall data quality score.
 
-    Plotly's indicator trace type renders gauges natively.
     The colour transitions: red (<45) → orange → yellow → teal (>90).
-
-    stats dict should include: rows_removed, nulls_filled,
-    duplicates_removed, outliers_detected.
     """
     color = (
         "#5DCAA5" if quality_score >= 75 else
@@ -655,9 +676,9 @@ def make_quality_gauge(
                 {"range": [90,100], "color": "rgba(93,202,165,0.18)"},
             ],
             "threshold": {
-                "line":  {"color": "white", "width": 2},
+                "line":      {"color": "white", "width": 2},
                 "thickness": 0.75,
-                "value": quality_score,
+                "value":     quality_score,
             },
         },
         "title": {
@@ -674,6 +695,9 @@ def make_quality_gauge(
 
     rows_removed = stats.get("rows_removed", 0)
     nulls_filled = stats.get("nulls_filled", 0)
+
+    # FIX: sanitize trace before passing to ChartConfig
+    trace = _sanitize_trace(trace)
 
     return ChartConfig(
         chart_id      = "quality_gauge",
@@ -698,8 +722,8 @@ def build_dashboard(
     df:            pd.DataFrame,
     session_id:    str,
     dataset_name:  str,
-    insights_report,              # InsightsReport from Phase 4
-    cleaning_report = None,       # CleaningReport from Phase 2 (optional)
+    insights_report,
+    cleaning_report = None,
     type_map: Dict[str, str] = None,
 ) -> DashboardConfig:
     """
@@ -718,7 +742,6 @@ def build_dashboard(
     charts = []
     tmap   = type_map or {}
 
-    # Infer type_map from DataFrame if not provided
     if not tmap:
         for col in df.columns:
             dtype = str(df[col].dtype)
@@ -763,7 +786,6 @@ def build_dashboard(
 
     # ── 4. PCA scatter ───────────────────────────────────────────
     if insights_report and insights_report.pca and len(numeric_cols) >= 3:
-        # Use first categorical col as colour if available
         color_col = cat_cols[0] if cat_cols else None
         pca_chart = make_pca_scatter(df, insights_report.pca, color_col, priority=2)
         if pca_chart:
@@ -775,7 +797,6 @@ def build_dashboard(
 
     # ── 6. Box plot overview ─────────────────────────────────────
     if len(numeric_cols) >= 2:
-        # Also make grouped box plots for top categorical column
         if cat_cols:
             for num_col in numeric_cols[:3]:
                 charts.append(make_box_plot(
@@ -801,15 +822,14 @@ def build_dashboard(
                     df, pair.col_a, pair.col_b, color_col, priority=3
                 ))
 
-    # Sort by priority (lower = shown first)
     charts.sort(key=lambda c: c.priority)
 
     return DashboardConfig(
-        session_id   = session_id,
-        dataset_name = dataset_name,
-        row_count    = len(df),
-        col_count    = len(df.columns),
-        charts       = charts,
+        session_id    = session_id,
+        dataset_name  = dataset_name,
+        row_count     = len(df),
+        col_count     = len(df.columns),
+        charts        = charts,
         quality_score = cleaning_report.quality_score if cleaning_report else None,
         quality_grade = cleaning_report.quality_grade if cleaning_report else None,
         generated_at  = datetime.utcnow().isoformat(),
