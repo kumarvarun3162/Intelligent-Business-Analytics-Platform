@@ -1,7 +1,11 @@
 // frontend/src/components/Dashboard/ChartPanel.jsx
 import { useState, lazy, Suspense } from 'react'
 
-const Plot = lazy(() => import('react-plotly.js'))
+const Plot = lazy(() =>
+  import('react-plotly.js').then(mod => ({
+    default: mod.default
+  }))
+)
 
 const CHART_TYPE_BADGE = {
   histogram:   { label: 'Distribution', color: 'bg-blue-900/40 text-blue-300 border-blue-800' },
