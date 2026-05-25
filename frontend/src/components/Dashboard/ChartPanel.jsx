@@ -1,4 +1,4 @@
-// frontend/src/components/Dashboard/ChartPanel.jsx
+
 import { useState, lazy, Suspense } from 'react'
 
 const Plot = lazy(() =>
