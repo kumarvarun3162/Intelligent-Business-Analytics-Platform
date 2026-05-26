@@ -1,3 +1,4 @@
+// frontend/vite.config.js
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
@@ -9,7 +10,6 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks: {
-          // Split Plotly into its own chunk so the main bundle stays small
           plotly: ['plotly.js-dist-min'],
           react:  ['react', 'react-dom'],
         },
@@ -18,6 +18,6 @@ export default defineConfig({
     chunkSizeWarningLimit: 3000,
   },
   optimizeDeps: {
-    include: ['react-plotly.js', 'plotly.js-dist-min'],
+    include: ['plotly.js-dist-min'],
   },
 })

@@ -1,16 +1,28 @@
 // frontend/src/components/Dashboard/Dashboard.jsx
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useCallback } from 'react'
 import axios from 'axios'
 import ChartPanel from './ChartPanel'
 import DashboardHeader from './DashboardHeader'
 
 const API_BASE = 'http://localhost:8080'
 
+const CHART_TYPE_LABELS = {
+  all:         'All charts',
+  histogram:   'Distributions',
+  box:         'Box plots',
+  bar:         'Categories',
+  scatter:     'Scatter',
+  line:        'Time series',
+  heatmap:     'Heatmap',
+  pca_scatter: 'PCA',
+  gauge:       'Quality',
+}
+
 export default function Dashboard({ sessionId }) {
-  const [loading, setLoading]   = useState(false)
+  const [loading,   setLoading]   = useState(false)
   const [dashboard, setDashboard] = useState(null)
-  const [error, setError]       = useState(null)
-  const [filter, setFilter]     = useState('all')
+  const [error,     setError]     = useState(null)
+  const [filter,    setFilter]    = useState('all')
 
   const generate = useCallback(async () => {
     setLoading(true)
@@ -27,18 +39,6 @@ export default function Dashboard({ sessionId }) {
     }
   }, [sessionId])
 
-  const CHART_TYPE_LABELS = {
-    all:         'All charts',
-    histogram:   'Distributions',
-    box:         'Box plots',
-    bar:         'Categories',
-    scatter:     'Scatter',
-    line:        'Time series',
-    heatmap:     'Heatmap',
-    pca_scatter: 'PCA',
-    gauge:       'Quality',
-  }
-
   const visibleCharts = dashboard?.charts.filter(c =>
     filter === 'all' || c.chart_type === filter
   ) ?? []
@@ -51,7 +51,7 @@ export default function Dashboard({ sessionId }) {
   return (
     <div className="bg-gray-900 rounded-2xl border border-gray-800 overflow-hidden">
 
-      {/* Header */}
+      {/* ── Header ── */}
       <div className="p-6 border-b border-gray-800">
         <div className="flex items-start justify-between gap-4">
           <div>
@@ -65,41 +65,37 @@ export default function Dashboard({ sessionId }) {
           <button
             onClick={generate}
             disabled={loading}
-            className="shrink-0 bg-blue-600 hover:bg-blue-500
-                       disabled:bg-gray-700 text-white text-sm font-medium
-                       px-5 py-2.5 rounded-xl transition-colors"
+            className="shrink-0 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700
+                       text-white text-sm font-medium px-5 py-2.5 rounded-xl
+                       transition-colors"
           >
-            {loading
-              ? 'Generating…'
-              : dashboard
-              ? 'Regenerate'
-              : 'Generate dashboard'}
+            {loading ? 'Generating…' : dashboard ? 'Regenerate' : 'Generate dashboard'}
           </button>
         </div>
       </div>
 
+      {/* ── Error ── */}
       {error && (
         <div className="px-6 py-4 bg-red-900/20 border-b border-red-800/40">
           <p className="text-red-400 text-sm">{error}</p>
         </div>
       )}
 
+      {/* ── Loading spinner ── */}
       {loading && (
         <div className="p-12 flex flex-col items-center gap-4">
           <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent
                           rounded-full animate-spin" />
-          <p className="text-gray-400 text-sm">
-            Building {dashboard ? 'new ' : ''}charts…
-          </p>
+          <p className="text-gray-400 text-sm">Building charts…</p>
         </div>
       )}
 
+      {/* ── Dashboard content ── */}
       {dashboard && !loading && (
         <>
-          {/* Dashboard summary row */}
           <DashboardHeader dashboard={dashboard} />
 
-          {/* Chart type filter tabs */}
+          {/* Filter tabs */}
           <div className="px-6 py-3 border-b border-gray-800 flex gap-1 flex-wrap">
             {Object.entries(CHART_TYPE_LABELS).map(([type, label]) => {
               const count = type === 'all'
@@ -137,8 +133,8 @@ export default function Dashboard({ sessionId }) {
                     key={chart.chart_id}
                     chart={chart}
                     fullWidth={
-                      chart.chart_type === 'heatmap' ||
-                      chart.chart_type === 'line'   ||
+                      chart.chart_type === 'heatmap'     ||
+                      chart.chart_type === 'line'        ||
                       chart.chart_type === 'pca_scatter'
                     }
                   />
