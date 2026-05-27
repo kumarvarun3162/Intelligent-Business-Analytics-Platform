@@ -12,6 +12,7 @@ from api.routes.engineer import router as engineer_router
 from api.routes.analyze import router as analyze_router
 from api.routes.charts import router as charts_router
 from api.routes.report import router as report_router
+from api.routes.report_stream import router as report_stream_router
 
 
 # ── Lifespan: runs once at startup and shutdown ──────────────────
@@ -56,6 +57,7 @@ app.include_router(engineer_router)
 app.include_router(analyze_router)
 app.include_router(charts_router)
 app.include_router(report_router)
+app.include_router(report_stream_router)
 
 # ── Health check ─────────────────────────────────────────────────
 @app.get("/health", tags=["system"])

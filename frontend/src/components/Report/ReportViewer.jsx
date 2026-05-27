@@ -64,7 +64,7 @@ function PassportStage({ stage }) {
 
 function DownloadButton({ label, icon, href, color }) {
   return (
-    
+    <a
       href={href}
       target="_blank"
       rel="noreferrer"
@@ -99,6 +99,63 @@ export default function ReportViewer({ sessionId }) {
     }
   }
 
+  const handleStream = async () => {
+    setLoading(true)
+    setError(null)
+    // Build an empty report shell to stream into
+    const streamingReport = {
+      dataset_name:  'Streaming…',
+      generated_at:  new Date().toISOString(),
+      model_used:    'llama-3.3-70b-versatile',
+      narrative:     [],
+      data_passport: null,
+      download_urls: {},
+    }
+    setReport(streamingReport)
+    try {
+      const response = await fetch(`${API_BASE}/api/report/stream`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ session_id: sessionId }),
+      })
+      const reader  = response.body.getReader()
+      const decoder = new TextDecoder()
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        const text  = decoder.decode(value)
+        const lines = text.split('\n').filter(l => l.startsWith('data: '))
+        for (const line of lines) {
+          try {
+            const payload = JSON.parse(line.slice(6))
+            if (payload.done) {
+              setLoading(false)
+              break
+            }
+            if (payload.section_done) {
+              setReport(prev => ({
+                ...prev,
+                narrative: [
+                  ...(prev.narrative || []),
+                  {
+                    section: payload.section,
+                    title:   payload.title,
+                    emoji:   payload.emoji,
+                    content: payload.content,
+                  },
+                ],
+              }))
+            }
+          } catch (_) {}
+        }
+      }
+    } catch (err) {
+      setError('Streaming failed: ' + err.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
   const passport = report?.data_passport
 
   return (
@@ -115,19 +172,26 @@ export default function ReportViewer({ sessionId }) {
               LLM-narrated analysis · PDF export · data passport · ML-ready CSV
             </p>
           </div>
-          <button
-            onClick={handleGenerate}
-            disabled={loading}
-            className="shrink-0 bg-teal-700 hover:bg-teal-600
-                       disabled:bg-gray-700 text-white text-sm font-medium
-                       px-5 py-2.5 rounded-xl transition-colors"
-          >
-            {loading
-              ? 'Generating report…'
-              : report
-              ? 'Regenerate'
-              : 'Generate report'}
-          </button>
+          <div className="flex gap-2 shrink-0">
+            <button
+              onClick={handleStream}
+              disabled={loading}
+              className="bg-purple-700 hover:bg-purple-600 disabled:bg-gray-700
+                         text-white text-sm font-medium px-4 py-2.5 rounded-xl
+                         transition-colors"
+            >
+              {loading ? '…' : '⚡ Stream'}
+            </button>
+            <button
+              onClick={handleGenerate}
+              disabled={loading}
+              className="bg-teal-700 hover:bg-teal-600 disabled:bg-gray-700
+                         text-white text-sm font-medium px-4 py-2.5 rounded-xl
+                         transition-colors"
+            >
+              {loading ? 'Generating…' : report ? 'Regenerate' : 'Generate'}
+            </button>
+          </div>
         </div>
       </div>
 
