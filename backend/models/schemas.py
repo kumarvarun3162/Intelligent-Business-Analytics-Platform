@@ -277,3 +277,47 @@ class DashboardResponse(BaseModel):
     success:   bool
     message:   str
     dashboard: Optional[DashboardConfig] = None
+
+# ── Phase 6 schemas ───────────────────────────────────────────────
+
+class NarrativeSection(BaseModel):
+    """One section of the LLM-generated narrative report."""
+    section:   str    # e.g. "executive_summary", "data_quality", "key_findings"
+    title:     str    # display title
+    content:   str    # LLM-generated prose
+    emoji:     str    # visual anchor for the UI
+
+
+class DataPassport(BaseModel):
+    """
+    Complete audit trail of every transformation applied
+    to the dataset — from raw upload to ML-ready output.
+    """
+    session_id:       str
+    original_file:    str
+    generated_at:     str
+    pipeline_stages:  List[Dict[str, Any]]  # ordered list of stage summaries
+    column_lineage:   Dict[str, str]        # original col → final col name
+    quality_score:    Optional[float]
+    quality_grade:    Optional[str]
+    ml_ready:         bool
+    total_transforms: int
+    cleaning_actions: int
+    new_features:     int
+
+
+class ReportConfig(BaseModel):
+    """Full report payload stored and served by the API."""
+    session_id:    str
+    dataset_name:  str
+    generated_at:  str
+    narrative:     List[NarrativeSection]
+    data_passport: DataPassport
+    download_urls: Dict[str, str]   # "csv" → "/api/download/...", "pdf" → "..."
+    model_used:    str
+
+
+class ReportResponse(BaseModel):
+    success: bool
+    message: str
+    report:  Optional[ReportConfig] = None
