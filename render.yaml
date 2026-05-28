@@ -1,0 +1,31 @@
+# render.yaml  — place in repo root (ibap/)
+
+services:
+  - type: web
+    name: ibap
+    runtime: python
+    rootDir: backend
+    buildCommand: |
+      pip install -r requirements.txt
+      cd ../frontend && npm install && npm run build
+      mkdir -p ../backend/static
+      cp -r ../frontend/dist/* ../backend/static/
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0
+      - key: DEBUG
+        value: "false"
+      - key: RENDER_DISK_PATH
+        value: /data
+      - key: ALLOWED_ORIGINS
+        value: https://ibap.onrender.com
+      - key: GROQ_API_KEY
+        sync: false   # set manually in Render dashboard — never commit API keys
+      - key: GROQ_MODEL
+        value: llama-3.3-70b-versatile
+    disk:
+      name: ibap-data
+      mountPath: /data
+      sizeGB: 1
+    healthCheckPath: /health
