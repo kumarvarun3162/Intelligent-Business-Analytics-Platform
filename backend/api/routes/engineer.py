@@ -11,6 +11,9 @@ from core.ingestion import get_preview
 from models.schemas import EngineeringResponse
 from storage.database import get_connection
 
+from core.paths import ENGINEERED_DIR
+
+
 router = APIRouter(prefix="/api", tags=["engineering"])
 
 
@@ -85,7 +88,7 @@ async def engineer_dataset(req: EngineerRequest):
     # ── 4. Save engineered file ──────────────────────────────────
     eng_dir  = Path("uploads") / "engineered"
     eng_dir.mkdir(exist_ok=True)
-    eng_path = eng_dir / f"{req.session_id}_engineered.csv"
+    eng_path = ENGINEERED_DIR / f"{req.session_id}_engineered.csv"
     engineered_df.to_csv(eng_path, index=False)
 
     # ── 5. Persist engineering report ────────────────────────────

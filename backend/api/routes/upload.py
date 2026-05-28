@@ -10,13 +10,19 @@ from models.schemas import UploadResponse, ErrorResponse
 from core.ingestion import ingest_file
 from storage.database import save_session
 
+from core.paths import UPLOAD_DIR, ensure_dirs
+
+
+ensure_dirs()
+
+
 router = APIRouter(prefix="/api", tags=["upload"])
 
-UPLOAD_DIR    = Path("uploads")
+# UPLOAD_DIR    = Path("uploads")
 MAX_SIZE_BYTES = 50 * 1024 * 1024  # 50 MB
 ALLOWED_EXTS  = {"csv", "xlsx", "xls", "json"}
 
-UPLOAD_DIR.mkdir(exist_ok=True)
+# UPLOAD_DIR.mkdir(exist_ok=True)
 
 
 @router.post(

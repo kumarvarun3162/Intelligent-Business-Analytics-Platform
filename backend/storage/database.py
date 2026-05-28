@@ -4,8 +4,10 @@ import sqlite3
 import json
 from pathlib import Path
 from typing import Optional, Dict, Any
+import os
 
-DB_PATH = Path(__file__).parent.parent / "storage" / "ibap.sqlite3"
+_disk = os.getenv("RENDER_DISK_PATH", str(Path(__file__).parent.parent / "storage"))
+DB_PATH = Path(_disk) / "ibap.sqlite3"
 
 
 def get_connection() -> sqlite3.Connection:

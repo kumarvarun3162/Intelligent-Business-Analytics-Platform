@@ -11,6 +11,7 @@ from core.narrator      import generate_narrative
 from core.report_builder import build_data_passport, assemble_report
 from core.pdf_generator  import build_html_report, generate_pdf
 from models.schemas      import ReportResponse, CleaningReport, EngineeringReport, InsightsReport
+from core.paths import REPORTS_DIR
 from storage.database    import get_connection
 
 router = APIRouter(prefix="/api", tags=["report"])

@@ -10,6 +10,9 @@ from core.ingestion import get_preview
 from models.schemas import CleaningResponse
 from storage.database import get_session, get_connection
 
+from core.paths import CLEANED_DIR
+
+
 router = APIRouter(prefix="/api", tags=["cleaning"])
 
 
@@ -83,9 +86,7 @@ async def clean_dataset(req: CleanRequest):
                             detail=f"Cleaning pipeline failed: {e}")
 
     # ── 4. Save cleaned file ─────────────────────────────────────
-    cleaned_dir  = Path("uploads") / "cleaned"
-    cleaned_dir.mkdir(exist_ok=True)
-    cleaned_path = cleaned_dir / f"{req.session_id}_cleaned.csv"
+    cleaned_path = CLEANED_DIR / f"{req.session_id}_cleaned.csv"
     cleaned_df.to_csv(cleaned_path, index=False)
 
     # ── 5. Persist cleaning report ───────────────────────────────

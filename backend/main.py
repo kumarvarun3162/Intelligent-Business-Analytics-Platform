@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from contextlib import asynccontextmanager
+from core.paths import ensure_dirs
 
 from storage.database import init_db
 from api.routes.upload        import router as upload_router
@@ -21,10 +22,10 @@ from api.routes.report_stream import router as report_stream_router
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     print("🚀 Starting IBAP backend...")
+    ensure_dirs()   # ← add this line
     init_db()
     print("✅ Database initialized")
     yield
-    print("🛑 Shutting down IBAP backend...")
 
 
 app = FastAPI(
