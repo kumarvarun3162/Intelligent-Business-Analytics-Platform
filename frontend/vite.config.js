@@ -5,17 +5,29 @@ import tailwindcss from '@tailwindcss/vite'
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
-  server: { port: 5173 },
+  server: {
+    port: 5173,
+    proxy: {
+      // In dev, proxy /api calls to the backend so same-origin logic works
+      '/api': {
+        target: 'http://localhost:8080',
+        changeOrigin: true,
+      }
+    }
+  },
   build: {
+    outDir: 'dist',
+    emptyOutDir: true,
     rollupOptions: {
       output: {
         manualChunks: {
           plotly: ['plotly.js-dist-min'],
           react:  ['react', 'react-dom'],
+          vendor: ['axios'],
         },
       },
     },
-    chunkSizeWarningLimit: 3000,
+    chunkSizeWarningLimit: 3500,
   },
   optimizeDeps: {
     include: ['plotly.js-dist-min'],
