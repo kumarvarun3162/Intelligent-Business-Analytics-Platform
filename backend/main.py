@@ -22,10 +22,24 @@ from api.routes.report_stream import router as report_stream_router
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     print("🚀 Starting IBAP backend...")
-    ensure_dirs()   # ← add this line
+    ensure_dirs()
     init_db()
-    print("✅ Database initialized")
+
+    # Production safety checks
+    debug = os.getenv("DEBUG", "true").lower() == "true"
+    if not debug:
+        groq_key = os.getenv("GROQ_API_KEY", "")
+        if not groq_key:
+            print("⚠️  WARNING: GROQ_API_KEY not set — report generation will fail")
+        disk = os.getenv("RENDER_DISK_PATH", "")
+        if not disk:
+            print("⚠️  WARNING: RENDER_DISK_PATH not set — files won't persist across deploys")
+
+    print(f"✅ Database initialized at {DB_PATH}")
+    print(f"📁 Storage root: {DISK_ROOT}")
+    print(f"🔧 Debug mode: {debug}")
     yield
+    print("🛑 Shutting down IBAP backend...")
 
 
 app = FastAPI(
