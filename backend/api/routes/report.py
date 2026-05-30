@@ -1,33 +1,28 @@
 # backend/api/routes/report.py
 
 import json
-import pandas as pd
 from pathlib import Path
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 
-from core.narrator      import generate_narrative
+from core.narrator       import generate_narrative
 from core.report_builder import build_data_passport, assemble_report
 from core.pdf_generator  import build_html_report, generate_pdf
 from models.schemas      import ReportResponse, CleaningReport, EngineeringReport, InsightsReport
-from core.paths import REPORTS_DIR
+from core.paths          import REPORTS_DIR          # ← use this, don't overwrite
 from storage.database    import get_connection
 
 router = APIRouter(prefix="/api", tags=["report"])
 
-REPORTS_DIR = Path("uploads") / "reports"
-REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+# ── DO NOT redefine REPORTS_DIR here — use the one from core.paths ──
 
 
 class ReportRequest(BaseModel):
     session_id: str
 
 
-# ── Helper: load all reports for a session ───────────────────────
-
 def _load_session_reports(session_id: str):
-    """Load cleaning, engineering, and analysis reports from SQLite."""
     conn = get_connection()
     cur  = conn.cursor()
 
@@ -66,26 +61,30 @@ def _load_session_reports(session_id: str):
     summary="Generate full LLM-narrated report for a session",
 )
 async def generate_report(req: ReportRequest):
-    """
-    Orchestrates the full Phase 6 pipeline:
-    1. Load all prior phase reports
-    2. Call Groq LLM to generate narrative sections
-    3. Build data passport
-    4. Assemble final ReportConfig
-    5. Generate PDF
-    6. Persist everything
-    """
 
     dataset_name, cleaning_report, engineering_report, insights_report = \
         _load_session_reports(req.session_id)
 
+    # Check session exists
     if not cleaning_report:
+        conn = get_connection()
+        cur  = conn.cursor()
+        cur.execute("SELECT session_id FROM sessions WHERE session_id = ?",
+                    (req.session_id,))
+        exists = cur.fetchone()
+        conn.close()
+
+        if not exists:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Session '{req.session_id}' not found. Upload a file first."
+            )
         raise HTTPException(
-            status_code=404,
-            detail="No cleaning report found. Run /api/clean first."
+            status_code=400,
+            detail="No cleaning report found. Run POST /api/clean before generating a report."
         )
 
-    # ── 1. Generate LLM narrative ────────────────────────────────
+    # Generate LLM narrative
     try:
         narrative = generate_narrative(
             insights_report    = insights_report,
@@ -96,36 +95,36 @@ async def generate_report(req: ReportRequest):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Narrative generation failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Narrative generation failed: {str(e)}")
 
-    # ── 2. Build data passport ───────────────────────────────────
+    # Build data passport
     passport = build_data_passport(
-        session_id          = req.session_id,
-        dataset_name        = dataset_name,
-        cleaning_report     = cleaning_report,
-        engineering_report  = engineering_report,
-        insights_report     = insights_report,
+        session_id         = req.session_id,
+        dataset_name       = dataset_name,
+        cleaning_report    = cleaning_report,
+        engineering_report = engineering_report,
+        insights_report    = insights_report,
     )
 
-    # ── 3. Assemble report config ────────────────────────────────
+    # Assemble report config
     report_config = assemble_report(
-        session_id   = req.session_id,
-        dataset_name = dataset_name,
-        narrative    = narrative,
+        session_id    = req.session_id,
+        dataset_name  = dataset_name,
+        narrative     = narrative,
         data_passport = passport,
     )
 
-    # ── 4. Generate PDF ──────────────────────────────────────────
-    pdf_path = REPORTS_DIR / f"{req.session_id}_report.pdf"
+    # Generate PDF (non-fatal if it fails)
+    pdf_path = None
     try:
-        html = build_html_report(report_config, insights_report)
+        pdf_path = REPORTS_DIR / f"{req.session_id}_report.pdf"
+        html     = build_html_report(report_config, insights_report)
         generate_pdf(html, pdf_path)
     except Exception as e:
-        # PDF failure shouldn't block the JSON response
         pdf_path = None
-        print(f"PDF generation failed (non-fatal): {e}")
+        print(f"⚠️  PDF generation failed (non-fatal): {e}")
 
-    # ── 5. Persist report ────────────────────────────────────────
+    # Persist report
     conn = get_connection()
     cur  = conn.cursor()
     cur.execute("""
@@ -144,15 +143,32 @@ async def generate_report(req: ReportRequest):
     conn.commit()
     conn.close()
 
-    n_sections = len(narrative)
     return ReportResponse(
         success = True,
         message = (
-            f"Report generated: {n_sections} narrative sections, "
-            f"PDF {'ready' if pdf_path else 'unavailable'}."
+            f"Report generated: {len(narrative)} sections, "
+            f"PDF {'ready' if pdf_path else 'skipped'}."
         ),
-        report  = report_config,
+        report = report_config,
     )
+
+
+@router.get("/report/debug/{session_id}", summary="Debug: show what reports exist")
+async def debug_session(session_id: str):
+    conn = get_connection()
+    cur  = conn.cursor()
+    result = {"session_id": session_id}
+    for table in ["sessions", "cleaning_reports", "engineering_reports",
+                  "analysis_reports", "dashboards", "reports"]:
+        try:
+            cur.execute(f"SELECT COUNT(*) as c FROM {table} WHERE session_id = ?",
+                        (session_id,))
+            row = cur.fetchone()
+            result[table] = "found" if row and row["c"] > 0 else "missing"
+        except Exception:
+            result[table] = "table_not_exists"
+    conn.close()
+    return result
 
 
 @router.get("/report/{session_id}", summary="Retrieve stored report")
@@ -167,9 +183,7 @@ async def get_report(session_id: str):
     return json.loads(row["report_json"])
 
 
-# ── Download endpoints ───────────────────────────────────────────
-
-@router.get("/download/{session_id}/pdf", summary="Download PDF report")
+@router.get("/download/{session_id}/pdf")
 async def download_pdf(session_id: str):
     conn = get_connection()
     cur  = conn.cursor()
@@ -185,29 +199,29 @@ async def download_pdf(session_id: str):
         raise HTTPException(status_code=404, detail="PDF file missing from disk.")
 
     return FileResponse(
-        path     = str(pdf_path),
-        filename = f"report_{session_id[:8]}.pdf",
+        path       = str(pdf_path),
+        filename   = f"report_{session_id[:8]}.pdf",
         media_type = "application/pdf",
     )
 
 
-@router.get("/download/{session_id}/csv", summary="Download ML-ready CSV")
+@router.get("/download/{session_id}/csv")
 async def download_csv(session_id: str):
     conn = get_connection()
     cur  = conn.cursor()
 
-    # Try engineered first, then cleaned
-    cur.execute("SELECT engineered_path FROM engineering_reports WHERE session_id = ?", (session_id,))
-    row = cur.fetchone()
     file_path = None
-
+    cur.execute("SELECT engineered_path FROM engineering_reports WHERE session_id = ?",
+                (session_id,))
+    row = cur.fetchone()
     if row:
         p = Path(row["engineered_path"])
         if p.exists():
             file_path = p
 
     if not file_path:
-        cur.execute("SELECT cleaned_path FROM cleaning_reports WHERE session_id = ?", (session_id,))
+        cur.execute("SELECT cleaned_path FROM cleaning_reports WHERE session_id = ?",
+                    (session_id,))
         row = cur.fetchone()
         if row:
             p = Path(row["cleaned_path"])
@@ -226,7 +240,7 @@ async def download_csv(session_id: str):
     )
 
 
-@router.get("/download/{session_id}/passport", summary="Download data passport JSON")
+@router.get("/download/{session_id}/passport")
 async def download_passport(session_id: str):
     conn = get_connection()
     cur  = conn.cursor()
@@ -237,15 +251,13 @@ async def download_passport(session_id: str):
     if not row:
         raise HTTPException(status_code=404, detail="No report found.")
 
-    report = json.loads(row["report_json"])
+    report   = json.loads(row["report_json"])
     passport = report.get("data_passport", {})
 
-    # Return as downloadable JSON file
-    from fastapi.responses import Response
     return Response(
-        content      = json.dumps(passport, indent=2),
-        media_type   = "application/json",
-        headers      = {
+        content    = json.dumps(passport, indent=2),
+        media_type = "application/json",
+        headers    = {
             "Content-Disposition":
                 f'attachment; filename="passport_{session_id[:8]}.json"'
         },
