@@ -1,8 +1,7 @@
 // frontend/src/components/Engineering/EngineeringPanel.jsx
 import { useState } from 'react'
 import axios from 'axios'
-
-const API_BASE = 'http://localhost:8080'
+import API_BASE from '../../api/config'
 
 const TRANSFORM_COLORS = {
   one_hot_encode:     'bg-purple-900/40 text-purple-300 border-purple-800',

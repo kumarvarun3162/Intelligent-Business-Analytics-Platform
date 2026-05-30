@@ -1,7 +1,6 @@
 import { useState, useRef } from 'react'
 import axios from 'axios'
-
-const API_BASE = 'http://localhost:8080'
+import API_BASE from '../../api/config'
 
 export default function UploadZone({ onResult }) {
   const [dragging, setDragging]   = useState(false)

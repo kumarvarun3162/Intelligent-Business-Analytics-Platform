@@ -1,8 +1,7 @@
 // frontend/src/components/Analysis/InsightsPanel.jsx
 import { useState } from 'react'
 import axios from 'axios'
-
-const API_BASE = 'http://localhost:8080'
+import API_BASE from '../../api/config'
 
 function StatCard({ stat }) {
   const isSkewed = Math.abs(stat.skewness) > 1

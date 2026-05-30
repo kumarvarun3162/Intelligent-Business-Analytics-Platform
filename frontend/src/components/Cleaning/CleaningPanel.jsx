@@ -1,8 +1,7 @@
 import { useState } from 'react'
 import axios from 'axios'
 import AuditReport from './AuditReport'
-
-const API_BASE = 'http://localhost:8080'
+import API_BASE from '../../api/config'
 
 const GRADE_COLOR = {
   A: 'text-green-400',

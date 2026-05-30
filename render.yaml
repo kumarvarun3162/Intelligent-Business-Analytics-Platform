@@ -1,19 +1,22 @@
-# render.yaml  — place in repo root (ibap/)
-
+# render.yaml (place in project root ibap/)
 services:
   - type: web
     name: ibap
     runtime: python
     rootDir: backend
     buildCommand: |
+      apt-get install -y libpango-1.0-0 libpangoft2-1.0-0 libgdk-pixbuf2.0-0 libcairo2 libffi-dev 2>/dev/null || true
       pip install -r requirements.txt
-      cd ../frontend && npm install && npm run build
+      cd ../frontend && npm ci && npm run build
       mkdir -p ../backend/static
-      cp -r ../frontend/dist/* ../backend/static/
+      cp -r ../frontend/dist/. ../backend/static/
     startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    plan: free
     envVars:
       - key: PYTHON_VERSION
-        value: 3.11.0
+        value: "3.11.6"
+      - key: NODE_VERSION
+        value: "20"
       - key: DEBUG
         value: "false"
       - key: RENDER_DISK_PATH
@@ -21,7 +24,7 @@ services:
       - key: ALLOWED_ORIGINS
         value: https://ibap.onrender.com
       - key: GROQ_API_KEY
-        sync: false   # set manually in Render dashboard — never commit API keys
+        sync: false
       - key: GROQ_MODEL
         value: llama-3.3-70b-versatile
     disk:

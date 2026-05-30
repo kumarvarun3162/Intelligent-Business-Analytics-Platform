@@ -1,8 +1,7 @@
 // frontend/src/components/Report/ReportViewer.jsx
 import { useState } from 'react'
 import axios from 'axios'
-
-const API_BASE = 'http://localhost:8080'
+import API_BASE from '../../api/config'
 
 function NarrativeCard({ section }) {
   const [expanded, setExpanded] = useState(true)

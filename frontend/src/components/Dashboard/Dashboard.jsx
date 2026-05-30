@@ -3,8 +3,7 @@ import { useState, useCallback } from 'react'
 import axios from 'axios'
 import ChartPanel from './ChartPanel'
 import DashboardHeader from './DashboardHeader'
-
-const API_BASE = 'http://localhost:8080'
+import API_BASE from '../../api/config'
 
 const CHART_TYPE_LABELS = {
   all:         'All charts',
