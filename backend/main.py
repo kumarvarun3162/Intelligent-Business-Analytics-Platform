@@ -61,7 +61,7 @@ app = FastAPI(
 # Reads from .env — covers both Vite dev port (5173) and any custom port
 _origins_env = os.getenv(
     "ALLOWED_ORIGINS",
-    "http://localhost:5173,http://localhost:5174,http://127.0.0.1:5173"
+    "http://localhost:5173,http://127.0.0.1:5173,https://intelligent-business-analytics-platform-hjsb.onrender.com"
 )
 ALLOWED_ORIGINS = [o.strip() for o in _origins_env.split(",") if o.strip()]
 
