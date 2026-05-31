@@ -11,9 +11,11 @@ outputs/
 
 # Node
 node_modules/
-dist/
 .DS_Store
 
 # IDE
 .vscode/
 .idea/
+
+# DO NOT ignore dist — Render needs it
+# dist/    ← remove this line

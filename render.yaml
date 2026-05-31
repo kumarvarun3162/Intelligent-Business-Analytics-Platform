@@ -1,4 +1,4 @@
-# render.yaml — place in project ROOT (ibap/), not inside backend/
+# render.yaml — in project root (ibap/)
 
 services:
   - type: web
@@ -8,12 +8,9 @@ services:
     buildCommand: |
       apt-get install -y libpango-1.0-0 libpangoft2-1.0-0 libgdk-pixbuf2.0-0 libcairo2 libffi-dev || true
       pip install -r requirements.txt
-      cd ../frontend
-      npm install
-      npm run build
-      cd ../backend
-      mkdir -p static
-      cp -r ../frontend/dist/. static/
+      cd ../frontend && npm install && npm run build
+      mkdir -p ../backend/static
+      cp -r ../frontend/dist/. ../backend/static/
     startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
     plan: free
     envVars:
@@ -24,7 +21,7 @@ services:
       - key: RENDER_DISK_PATH
         value: /data
       - key: ALLOWED_ORIGINS
-        value: https://ibap.onrender.com
+        value: https://intelligent-business-analytics-platform.onrender.com
       - key: GROQ_API_KEY
         sync: false
       - key: GROQ_MODEL
