@@ -3,22 +3,25 @@
 import os
 import json
 from typing import List, Optional
+from dotenv import load_dotenv
 from groq import Groq
 
 from models.schemas import NarrativeSection
 
+# Safety net: load .env in case this module is imported before main.py loads it
+load_dotenv()
 
-# ── Groq client (lazy init — only created when needed) ───────────
 _client: Optional[Groq] = None
 
 def _get_client() -> Groq:
     global _client
     if _client is None:
-        api_key = os.getenv("GROQ_API_KEY")
+        api_key = os.getenv("GROQ_API_KEY", "").strip()
         if not api_key:
             raise ValueError(
-                "GROQ_API_KEY not set. Add it to your .env file. "
-                "Get a free key at console.groq.com"
+                "GROQ_API_KEY not set. Add it to backend/.env:\n"
+                "  GROQ_API_KEY=your_key_here\n"
+                "Get a free key at: https://console.groq.com"
             )
         _client = Groq(api_key=api_key)
     return _client
