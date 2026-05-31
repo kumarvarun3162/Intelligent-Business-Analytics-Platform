@@ -16,19 +16,10 @@ export default defineConfig({
     }
   },
   build: {
-    outDir: 'dist',
-    emptyOutDir: true,
-    rollupOptions: {
-      output: {
-        manualChunks: {
-          plotly: ['plotly.js-dist-min'],
-          react:  ['react', 'react-dom'],
-          vendor: ['axios'],
-        },
-      },
-    },
-    chunkSizeWarningLimit: 3500,
-  },
+  outDir: 'dist',
+  emptyOutDir: true,
+  chunkSizeWarningLimit: 3500,
+},
   optimizeDeps: {
     include: ['plotly.js-dist-min'],
   },
